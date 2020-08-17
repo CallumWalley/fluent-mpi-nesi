@@ -138,27 +138,27 @@ openmpi_run ()
 
     case $my_protocol in
         tcp)
-            my_ic_flag="--mca btl self,sm,tcp  --mca btl_sm_use_knem 0"
+            my_ic_flag="--mca btl self,vader,tcp  --mca btl_sm_use_knem 0"
             ;;
         usnic)
-            my_ic_flag="--mca btl self,sm,usnic"
+            my_ic_flag="--mca btl self,vader,usnic"
             ;;
         gm)
             echo "Error: protocol $my_protocol not implemented for Open MPI"
             exit 1
-            my_ic_flag="--mca btl self,sm,gm"
+            my_ic_flag="--mca btl self,vader,gm"
             ;;
         mx)
-            my_ic_flag="--mca pml ob1 --mca btl self,sm,mx"
+            my_ic_flag="--mca pml ob1 --mca btl self,vader,mx"
             # put MX libs in lib path
             sys_prepend_ld_library_path "/opt/mx/lib64"
             ;;
         ofed)
-            my_ic_flag="--mca btl self,sm,openib"
+            my_ic_flag="--mca btl self,vader,openib"
 ## OpenMPI/IB uses rand48() functions. So, any module using rand48() will need to be cautious. 
             ;;
         vapi)
-            my_ic_flag="--mca btl self,sm,mvapi"
+            my_ic_flag="--mca btl self,vader,mvapi"
             ;;
         *)
             echo "Error: protocol $my_protocol not implemented for Open MPI"
@@ -170,9 +170,9 @@ openmpi_run ()
 
     case $FS_ARCH in
         aix*)
-            my_arch_flags="--x LIBPATH";;
+            my_arch_flags="-x LIBPATH";;
         *)
-            my_arch_flags="--x LD_LIBRARY_PATH";;
+            my_arch_flags="-x LD_LIBRARY_PATH";;
         esac
 
     # build parallel executable command
@@ -217,7 +217,7 @@ openmpi_run ()
     if [ -z "$FS_CNF" ]; then
         my_lhost=`hostname`
         my_cmdline="$my_cmdline $my_per_host_flags \
-            --np $FS_NPROC --host $my_lhost $FS_CMD"
+            --np $FS_NPROC --host ${my_lhost}:$FS_NPROC $FS_CMD"
 
     # consider launch on remote nodes
 
@@ -225,7 +225,7 @@ openmpi_run ()
         ## AFD specific env setup
         my_envvars=
         if [ -n "$PYTHONHOME" ]; then
-          my_envvars="-x PYTHONHOME=$PYTHONHOME $my_env_vars"
+          my_envvars="-x PYTHONHOME=$PYTHONHOME $my_envvars"
         fi
         if [ -n "$AFD_ROOT" ]; then
           my_envvars="-x AFD_ROOT=$AFD_ROOT $my_envvars"
@@ -244,6 +244,9 @@ openmpi_run ()
           my_envvars="-x FLUENT_AFFINITY=$FLUENT_AFFINITY $my_envvars"
        fi
 
+       if [[ ! -z "$FLUENT_ARCH" ]]; then
+         my_envvars="-x FLUENT_ARCH=$FLUENT_ARCH $my_envvars"
+       fi
 
         if [ "$FS_ARCH" == "lop64" ]; then
           my_envvars="-x OMP_WAIT_POLICY=passive $my_envvars"
@@ -447,6 +450,10 @@ intel_run ()
 #      FS_MPIRUN_FLAGS="$FS_MPIRUN_FLAGS -genv I_MPI_MIC=enable "
 #    fi
 
+    if [[ ! -z "$FLUENT_ARCH" ]]; then
+      FS_MPIRUN_FLAGS="$FS_MPIRUN_FLAGS -genv FLUENT_ARCH $FLUENT_ARCH"
+    fi
+
     # use I_MPI_DEBUG 1001 for verbose output
     FS_MPIRUN_FLAGS="$FS_MPIRUN_FLAGS -genv I_MPI_DEBUG 0"
 
@@ -495,11 +502,13 @@ intel_run ()
     export PATH
 
     if [ -n "$FS_CNF" -o -n "$FS_MIC_CNF" ]; then
-      if [ -z "$SCHEDULER_RSH" ]; then
+      if [ -z "$SCHEDULER_TIGHT_COUPLING" ]; then
         mpdargs="--rsh=$FS_RSHELL"
       else
         if [ -n "$PBS_ENABLED" ]; then
-           mpdargs="-bootstrap pbsdsh"
+           export I_MPI_HYDRA_BOOTSTRAP=rsh
+           export I_MPI_HYDRA_BOOTSTRAP_EXEC=pbs_tmrsh
+           #mpdargs="-bootstrap pbsdsh"  # Intel issue: this only works for Torque
         elif [ -n "$LSF_ENABLED" ]; then
            mpdargs="-bootstrap lsf"
         elif [ -n "$SGE_ENABLED" ]; then
@@ -840,14 +849,19 @@ ibmmpi_run ()
     # generic (single-host, appfile, and non-XC LSF) execution  
     #
     else
-      if [ -z "$SCHEDULER_RSH" ]; then
-        my_cmdline="$MPI_ROOT/bin/mpirun $IBMMPI_MPIRUN_FLAGS $FS_MPIRUN_FLAGS"
-      else
+
+      my_cmdline="$MPI_ROOT/bin/mpirun $IBMMPI_MPIRUN_FLAGS $FS_MPIRUN_FLAGS"
+      if [ -n "$SCHEDULER_TIGHT_COUPLING" ]; then
+
         if [ -n "$LSF_ENABLED" ]; then
-         my_cmdline="$MPI_ROOT/bin/mpirun -lsf -e MPI_USELSF_VERSION=9 $IBMMPI_MPIRUN_FLAGS $FS_MPIRUN_FLAGS"
-        else # For other schedulers no native support from IBM MPI
-           my_cmdline="$MPI_ROOT/bin/mpirun $IBMMPI_MPIRUN_FLAGS $FS_MPIRUN_FLAGS"
+          my_cmdline="$my_cmdline -lsf"
+          export MPI_REMSH=blaunch
+        elif [ -n "$SGE_ENABLED" ]; then
+           export MPI_REMSH=$SGE_ROOT/mpi/rsh
+        elif [ -n "$PBS_ENABLED" ]; then
+           export MPI_REMSH=pbs_tmrsh
         fi
+
       fi
 
         # enable one-sided communication; MPI_SHMEMCNTL defines # of envelops,
@@ -901,6 +915,10 @@ ibmmpi_run ()
 
             if [ -n "$FLUENT_AFFINITY" ]; then
                my_envvars="-e FLUENT_AFFINITY=$FLUENT_AFFINITY $my_envvars"
+            fi
+
+            if [[ ! -z "$FLUENT_ARCH" ]]; then
+              my_envvars="-e FLUENT_ARCH=$FLUENT_ARCH $my_envvars"
             fi
 
             if [ "$ibmmpi_system" = "hpux" ]; then
@@ -1243,6 +1261,10 @@ hp_run ()
                my_envvars="-e FLUENT_PROD_DIR=$FLUENT_PROD_DIR $my_envvars"
             fi
 
+            if [[ ! -z "$FLUENT_ARCH" ]]; then
+              my_envvars="-e FLUENT_ARCH=$FLUENT_ARCH $my_envvars"
+            fi
+
             if [ "$hpmpi_system" = "hpux" ]; then
                 if [ -n "$SHLIB_PATH" ]; then
                     my_envvars="-e SHLIB_PATH=$SHLIB_PATH $my_envvars" 
@@ -1419,8 +1441,12 @@ cray_run ()
 #           done
 #        fi
 
+        if [[ ! -z "$FLUENT_ARCH" ]]; then
+          echo "export FLUENT_ARCH=$FLUENT_ARCH"              >> ${my_env_dat}
+        fi
+
         if [ -n "$FLUENT_PROD_DIR" ]; then
-           echo "export FLUENT_PROD_DIR=$FLUENT_PROD_DIR " >> ${my_env_dat}
+           echo "export FLUENT_PROD_DIR=$FLUENT_PROD_DIR "    >> ${my_env_dat}
         fi
         if [ -n "$PYTHONHOME" ]; then
           echo "export PYTHONHOME=$PYTHONHOME               " >> ${my_env_dat}
@@ -1489,8 +1515,12 @@ cray_run ()
 
     my_lhost=`hostname`
 
+    # srun is used if FLUENT_ENABLE_SLURM_SUPPORT is 1.
+    # srun doesn't take "-cc none" option (it's equivalent is --cpu-bind=none)
     if [ -z "$FL_ENABLE_CRAY_AFFINITY" ]; then
-      my_cmdline="$my_cmdline -cc none"
+      if [ ! "$FLUENT_ENABLE_SLURM_SUPPORT" = "1" ]; then
+        my_cmdline="$my_cmdline -cc none"
+      fi
     fi
 
     my_cmdline="$my_cmdline -n $FS_NPROC $FS_MPIRUN_FLAGS $FS_CMD"
