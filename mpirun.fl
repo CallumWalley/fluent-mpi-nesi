@@ -57,6 +57,8 @@ openmpi_run ()
 
     # set and export MPI location (OPENMPI_ROOT variable)
 
+    echo "*** Using NeSI OpenMPI/srun method to launch MPI Fluent"
+
     if [ -n "$OPENMPI_ROOT" ]; then
         echo "***"
         echo "*** Using locally installed OpenMPI library!"
@@ -65,218 +67,21 @@ openmpi_run ()
         echo "***"
         export OPENMPI_ROOT
     else
-#       if [ "$FS_ARCH" = "lnamd64" -a "$FS_MPI" = "openmpi" ]; then
-#          if [ -x /usr/mpi/gcc/openmpi*/bin/mpirun ]; then
-#             OPENMPI_ROOT=`ls -dt /usr/mpi/gcc/openmpi* | head -n 1`
-#             export OPENMPI_ROOT
-#          elif [ -x /usr/mpi/pathscale/openmpi*/bin/mpirun ]; then
-#             OPENMPI_ROOT=`ls -dt /usr/mpi/pathscale/openmpi* | head -n 1`
-#             export OPENMPI_ROOT
-#          elif [ -x /usr/mpi/pgi/openmpi*/bin/mpirun ]; then
-#             OPENMPI_ROOT=`ls -dt /usr/mpi/pgi/openmpi* | head -n 1`
-#             export OPENMPI_ROOT
-#          elif [ -x /usr/mpi/intel/openmpi*/bin/mpirun ]; then
-#             OPENMPI_ROOT=`ls -dt /usr/mpi/intel/openmpi* | head -n 1`
-#             export OPENMPI_ROOT
-#          fi
-
-#          LD_LIBRARY_PATH="$OPENMPI_ROOT/lib64:$LD_LIBRARY_PATH"
-#          export LD_LIBRARY_PATH
-
-#          if [ -n "$OPENMPI_ROOT" ]; then
-#             printf "********************* \n" 1>&2
-#             printf "Using locally installed OpenMPI library! \n" 1>&2
-#             printf "OPENMPI_ROOT=\"$OPENMPI_ROOT\" \n" 1>&2
-#             printf "********************* \n" 1>&2
-#          fi
-#       fi
-
-       if [ -z "$OPENMPI_ROOT" ]; then
-          OPENMPI_ROOT=$FS_MPTROOT/mpi/$FS_ARCH/$FS_MPI
-          export OPENMPI_ROOT
-
-          OPAL_PREFIX=$OPENMPI_ROOT
-          export OPAL_PREFIX
-       fi
+        module load OpenMPI/.1.6.5-GCC-5.4.0
+        export OPENMPI_ROOT=$EBROOTOPENMPI
+        export MALLOC_CHECK_=1
     fi
-
 
     sys_prepend_ld_library_path "$OPENMPI_ROOT/lib:$OPENMPI_ROOT/lib/openmpi"
     export OPAL_PREFIX=$OPENMPI_ROOT
-
-    # determine interconnect/protocol
-
-    my_protocol=tcp
-    case $FS_IC in
-        eth | ethernet | default)
-            case $FS_IC_VARIANT in
-            usnic)
-                my_protocol=usnic;;
-            *)
-                my_protocol=tcp;;
-            esac
-            ;;
-        myri | myrinet)
-            case $FS_IC_VARIANT in
-            gm)
-                my_protocol=gm;;
-            *)
-                my_protocol=mx;;
-            esac
-            ;;
-        ib | infiniband)
-            case $FS_IC_VARIANT in
-            silverstorm | dapl)
-                my_protocol=dapl;;
-            ofed)
-                my_protocol=ofed;;
-            *)
-                my_protocol=vapi;;
-            esac
-            ;;
-    esac
-
-    case $my_protocol in
-        tcp)
-            my_ic_flag="--mca btl self,sm,tcp  --mca btl_sm_use_knem 0"
-            ;;
-        usnic)
-            my_ic_flag="--mca btl self,sm,usnic"
-            ;;
-        gm)
-            echo "Error: protocol $my_protocol not implemented for Open MPI"
-            exit 1
-            my_ic_flag="--mca btl self,sm,gm"
-            ;;
-        mx)
-            my_ic_flag="--mca pml ob1 --mca btl self,sm,mx"
-            # put MX libs in lib path
-            sys_prepend_ld_library_path "/opt/mx/lib64"
-            ;;
-        ofed)
-            my_ic_flag="--mca btl self,sm,openib"
-## OpenMPI/IB uses rand48() functions. So, any module using rand48() will need to be cautious. 
-            ;;
-        vapi)
-            my_ic_flag="--mca btl self,sm,mvapi"
-            ;;
-        *)
-            echo "Error: protocol $my_protocol not implemented for Open MPI"
-            exit 1
-            ;;
-    esac
-
-    # set arch-specific flags
-
-    case $FS_ARCH in
-        aix*)
-            my_arch_flags="--x LIBPATH";;
-        *)
-            my_arch_flags="--x LD_LIBRARY_PATH";;
-        esac
-
-    # build parallel executable command
-    #  - mca_component_show_load_errors disables load errors; this is used
-    #    temporarily to avoid mx, mvapi errors on systems that do not have
-    #    this hardware; issue is being addressed by OpenMPI team.
-    #  - use "-d" to debug startup
-    #  - export OMPI_MCA_plm_rsh_agent for rsh/ssh; using the command-line
-    #    argument "--mca plm_rsh_agent $FS_RSHELL" does not work with 1.2
-    #  - export OMPI_MCA_mca_component_show_load_errors to avoid load errors
-    #    for unused components; to avoid triggering testing checks on "error"
-    #    in output, "--mca mca_component_show_load_errors 0" is not used.
-
     
-    if [ "$FS_ARCH" == "lop64" ]; then
-       OMPI_MCA_plm_rsh_agent=$FS_RSHELL; export OMPI_MCA_plm_rsh_agent
-       OMPI_MCA_mca_base_component_show_load_errors=0
-       export OMPI_MCA_mca_base_component_show_load_errors
-    else
-       OMPI_MCA_orte_rsh_agent=$FS_RSHELL; export OMPI_MCA_orte_rsh_agent
-       OMPI_MCA_mca_component_show_load_errors=0
-       export OMPI_MCA_mca_component_show_load_errors
-    fi
-    H_MEMORYLOCKED=infinity; export H_MEMORYLOCKED
+    export OMPI_MCA_mca_component_show_load_errors=0
+    export H_MEMORYLOCKED=infinity
 
-    my_cmdline="$OPENMPI_ROOT/bin/mpirun $FS_MPIRUN_FLAGS"
-    my_per_host_flags="$my_ic_flag \
-        --prefix $OPENMPI_ROOT \
-        $my_arch_flags"
+    my_cmdline="srun -n $FS_NPROC $FS_CMD"
 
-    # fixup for file descriptor problem; stdin is closed by fluent but
-    # mpirun has problems with have stdin close; thus, stdin is opened
-    # from /dev/null.
-
-    fixfiledes() {
-        "$@" < /dev/null
-    }
-    my_cmdline="fixfiledes $my_cmdline"
-
-    # consider launch on local node
-
-    if [ -z "$FS_CNF" ]; then
-        my_lhost=`hostname`
-        my_cmdline="$my_cmdline $my_per_host_flags \
-            --np $FS_NPROC --host $my_lhost $FS_CMD"
-
-    # consider launch on remote nodes
-
-    else
-        ## AFD specific env setup
-        my_envvars=
-        if [ -n "$PYTHONHOME" ]; then
-          my_envvars="-x PYTHONHOME=$PYTHONHOME $my_env_vars"
-        fi
-        if [ -n "$AFD_ROOT" ]; then
-          my_envvars="-x AFD_ROOT=$AFD_ROOT $my_envvars"
-          if [ "$FS_ARCH" == "lnamd64" ]; then
-            AFD_ARCH="linx64"; export AFD_ARCH
-          fi
-          if [ -n "$AFD_ARCH" ]; then
-            my_envvars="-x AFD_ARCH=$AFD_ARCH $my_envvars"
-          fi
-        fi
-        if [ -n "$FLUENT_PROD_DIR" ]; then
-          my_envvars="-x FLUENT_PROD_DIR=$FLUENT_PROD_DIR $my_envvars"
-        fi
-
-       if [ -n "$FLUENT_AFFINITY" ]; then
-          my_envvars="-x FLUENT_AFFINITY=$FLUENT_AFFINITY $my_envvars"
-       fi
-
-
-        if [ "$FS_ARCH" == "lop64" ]; then
-          my_envvars="-x OMP_WAIT_POLICY=passive $my_envvars"
-        else
-          if [ -n "$FLUENT_KMP_AFFINITY" ]; then
-            my_envvars="-x KMP_AFFINITY=disabled $my_envvars"
-          fi
-        fi
-
-        my_hostlist=`parallel_get_hostlist -n $FS_NPROC -cnf=$FS_CNF \
-             -space`
-#            -keepcolon -space`
-
-        my_cmd=
-
-        # create appfile; fluent node executable launched directly from
-        # mpirun via appfile.
-        my_appfile="$FS_TMPDIR/fluent-appfile.$USER.$$"
-##        echo "# open-mpi app file" > $my_appfile        
-
-        for hostandcount in $my_hostlist
-        do
-            host=`echo $hostandcount | awk -F: '{print $1}'`
-            count=`echo $hostandcount | awk -F: '{print $2}'`
-
-##            echo "$my_per_host_flags -np $count --host $host $FS_CMD" \
-##                >> $my_appfile
-#            my_cmd="$my_cmd $my_per_host_flags -np $count --host $host $FS_CMD"
-             echo $host >> $my_appfile
-        done
-        
-##       my_cmdline="$my_cmdline --app $my_appfile";
-       my_cmdline="$my_cmdline $my_per_host_flags $my_envvars -np $FS_NPROC --hostfile $my_appfile $FS_CMD";
+    if [ "$FS_ARCH" == "lnamd64" ]; then
+      AFD_ARCH="linx64"; export AFD_ARCH
     fi
 
     # start job
@@ -284,12 +89,6 @@ openmpi_run ()
     echo Starting $my_cmdline
     $my_cmdline
     retval=$?
-
-    # cleanup temp file
-
-    if [ "X$my_appfile" != "X" ]; then
-        test -f $my_appfile && rm -f $my_appfile
-    fi
 
     return $retval
 }
