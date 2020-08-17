@@ -99,8 +99,6 @@ openmpi_run ()
           export OPAL_PREFIX
        fi
     fi
-
-
     sys_prepend_ld_library_path "$OPENMPI_ROOT/lib:$OPENMPI_ROOT/lib/openmpi"
     export OPAL_PREFIX=$OPENMPI_ROOT
 
@@ -257,8 +255,8 @@ openmpi_run ()
         fi
 
         my_hostlist=`parallel_get_hostlist -n $FS_NPROC -cnf=$FS_CNF \
-             -space`
-#            -keepcolon -space`
+            -keepcolon -space`
+#             -space`
 
         my_cmd=
 
@@ -275,7 +273,7 @@ openmpi_run ()
 ##            echo "$my_per_host_flags -np $count --host $host $FS_CMD" \
 ##                >> $my_appfile
 #            my_cmd="$my_cmd $my_per_host_flags -np $count --host $host $FS_CMD"
-             echo $host >> $my_appfile
+             echo $host "slots=$count" >> $my_appfile
         done
         
 ##       my_cmdline="$my_cmdline --app $my_appfile";
@@ -403,11 +401,6 @@ intel_run ()
 
       if [ -n "$impi_device" ]; then
           FS_MPIRUN_FLAGS="$FS_MPIRUN_FLAGS -genv I_MPI_DEVICE $impi_device"
-          # disable fallback device to avoid possible confusion over performance
-          FS_MPIRUN_FLAGS="$FS_MPIRUN_FLAGS -genv I_MPI_FALLBACK_DEVICE disable"
-      else
-          # enable fallback device when no specific interconnect is chosen
-          FS_MPIRUN_FLAGS="$FS_MPIRUN_FLAGS -genv I_MPI_FALLBACK_DEVICE enable"
       fi
     else
       impi_device=shm:tcp #default
@@ -436,13 +429,20 @@ intel_run ()
 
       if [ -n "$impi_device" ]; then
           FS_MPIRUN_FLAGS="$FS_MPIRUN_FLAGS -genv I_MPI_FABRICS $impi_device"
-
-          # disable fallback device to avoid possible confusion over performance
-          FS_MPIRUN_FLAGS="$FS_MPIRUN_FLAGS -genv I_MPI_FALLBACK_DEVICE disable"
-      else
-          # enable fallback device when no specific interconnect is chosen
-          FS_MPIRUN_FLAGS="$FS_MPIRUN_FLAGS -genv I_MPI_FALLBACK_DEVICE enable"
       fi
+    fi
+
+    if [[ $FS_MPIRUN_FLAGS != *"I_MPI_FALLBACK_DEVICE"* ]] ; then
+
+      if [ -n "$impi_device" ]; then
+        # disable fallback device to avoid possible confusion over performance
+        impi_fallback_device="disable"
+      else
+        # enable fallback device when no specific interconnect is chosen
+        impi_fallback_device="enable"
+      fi
+
+      FS_MPIRUN_FLAGS="$FS_MPIRUN_FLAGS -genv I_MPI_FALLBACK_DEVICE $impi_fallback_device"
     fi
 
 #    if [ -n "$FL_INTEL_MIC" ]; then
@@ -455,23 +455,41 @@ intel_run ()
     fi
 
     # use I_MPI_DEBUG 1001 for verbose output
-    FS_MPIRUN_FLAGS="$FS_MPIRUN_FLAGS -genv I_MPI_DEBUG 0"
+    if [[ $FS_MPIRUN_FLAGS != *"I_MPI_DEBUG"* ]] ; then
+      FS_MPIRUN_FLAGS="$FS_MPIRUN_FLAGS -genv I_MPI_DEBUG 0"
+    fi
 
     # disable pin mode which is binding multiple processes from different
     # jobs to the same core
+    #if [[ $FS_MPIRUN_FLAGS != *"I_MPI_PIN"* ]] ; then
     FS_MPIRUN_FLAGS="$FS_MPIRUN_FLAGS -genv I_MPI_PIN disable"
+    #fi
 
     # For better performance, suggested by Intel
-    FS_MPIRUN_FLAGS="$FS_MPIRUN_FLAGS -genv I_MPI_ADJUST_REDUCE 2  -genv I_MPI_ADJUST_ALLREDUCE 2 -genv I_MPI_ADJUST_BCAST 1"
+    if [[ $FS_MPIRUN_FLAGS != *"I_MPI_ADJUST_REDUCE"* ]] ; then
+      FS_MPIRUN_FLAGS="$FS_MPIRUN_FLAGS -genv I_MPI_ADJUST_REDUCE 2"
+    fi
+    if [[ $FS_MPIRUN_FLAGS != *"I_MPI_ADJUST_ALLREDUCE"* ]] ; then
+      FS_MPIRUN_FLAGS="$FS_MPIRUN_FLAGS -genv I_MPI_ADJUST_ALLREDUCE 2"
+    fi
+    if [[ $FS_MPIRUN_FLAGS != *"I_MPI_ADJUST_BCAST"* ]] ; then
+      FS_MPIRUN_FLAGS="$FS_MPIRUN_FLAGS -genv I_MPI_ADJUST_BCAST 1"
+    fi
 
     # For supporting mixed hardware
-    FS_MPIRUN_FLAGS="$FS_MPIRUN_FLAGS -genv I_MPI_PLATFORM auto"
+    if [[ $FS_MPIRUN_FLAGS != *"I_MPI_PLATFORM"* ]] ; then
+      FS_MPIRUN_FLAGS="$FS_MPIRUN_FLAGS -genv I_MPI_PLATFORM auto"
+    fi
 
     # For better scalability at large runs, suggested by Intel
-    FS_MPIRUN_FLAGS="$FS_MPIRUN_FLAGS -genv I_MPI_DAPL_SCALABLE_PROGRESS 1"
+    if [[ $FS_MPIRUN_FLAGS != *"I_MPI_DAPL_SCALABLE_PROGRESS"* ]] ; then
+      FS_MPIRUN_FLAGS="$FS_MPIRUN_FLAGS -genv I_MPI_DAPL_SCALABLE_PROGRESS 1"
+    fi
 
     # may need for rdma devices (see release notes)
-    #FS_MPIRUN_FLAGS="$FS_MPIRUN_FLAGS -genv I_MPI_RDMA_TRANSLATION_CACHE disable"
+    #if [[ $FS_MPIRUN_FLAGS != *"I_MPI_RDMA_TRANSLATION_CACHE"* ]] ; then
+    #  FS_MPIRUN_FLAGS="$FS_MPIRUN_FLAGS -genv I_MPI_RDMA_TRANSLATION_CACHE disable"
+    #fi
 
     # set and export MPI location (INTEL_ROOT variable)
     # Note: IntelMPI also calls this function
@@ -544,9 +562,9 @@ intel_run ()
 
     # Preloading Intel MPI MT (thread safe) library
 #    if [ "$FS_ARCH" == "lnamd64" -a -z "$FL_INTEL_MIC" ]; then
-    if [ "$FS_ARCH" == "lnamd64" ]; then
-      FS_MPIRUN_FLAGS="$FS_MPIRUN_FLAGS -genv LD_PRELOAD $INTEL_ROOT/lib/libmpi_mt.so"
-    fi
+#    if [ "$FS_ARCH" == "lnamd64" ]; then
+#      FS_MPIRUN_FLAGS="$FS_MPIRUN_FLAGS -genv LD_PRELOAD $INTEL_ROOT/lib/libmpi_mt.so"
+#    fi
 
     # Add MIC multipiort shared library path
 
@@ -2547,7 +2565,7 @@ parallel_get_hostlist () {
         # processes requested and removing colon.
 
         pgh_cnf=
-        if [ -n "$PARA_MESH_NPROCS" ] ; then
+        if [ -n "$PARA_MESH_NPROCS" -a -n "$FLUENT_AUTO_SPAWN" ] ; then
           skip_host=$PARA_MESH_NPROCS
         else
           skip_host=0
@@ -2570,6 +2588,10 @@ parallel_get_hostlist () {
                 fi
                 if [ -z "$count" ]; then
                     count=1
+                else
+                    if [ $nodetoadd -gt $count ]; then
+                        nodetoadd=$count
+                    fi
                 fi
                 #For dynamic process spawning, skip the first host since -t1 already spawned
                 if [ -n "$FLUENT_AUTO_SPAWN" -a $skip_host -gt 0 -a $pgh_nprocs -gt 1 ] ; then
@@ -2596,7 +2618,7 @@ parallel_get_hostlist () {
                     count=$nodetoadd
                 fi
                 if [ $nodetoadd -eq 0 ] ; then
-                    break;
+                    continue;
                 fi
                 if [ $pgh_use_colon -eq 1 ]; then
                     if [ -z "$pgh_cnf" ]; then
