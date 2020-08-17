@@ -1,0 +1,2626 @@
+#!/bin/sh
+#
+# mpirun.fl - starts a mpi job.
+#
+# description:
+#    This script abstracts the MPI startup for various MPI implementations.
+#    It has the same general functionality as mpirun/mpiexec.
+#
+# syntax:
+#    mpirun.fl --arch=<arch> --ic=<ic> [--ic_variant=<var>] [--mpi=<mpi>]
+#           [--prefix=<dir>] [--cnf=<file>] [--np=<nproc>]
+#           [--rsh=<rshell>] [--mpirun_flags="<flags>"] [--sched=<sched>]
+#           program [args]
+#
+# inputs arguments:
+#    --arch=<arch>      defines architecture (mandatory)
+#    --cnf=<file>       defines configuration file (optional)
+#    --ic=<ic>          defines hardware or interconnect (mandatory)
+#                       <ic>={ib|myri[net]|altix|crayx}
+#    --ic_variant=<var> defines interconnect variant (optional)
+#    --mpi=<mpi>        defines the MPI type (e.g., platform mpi, openmpi; def: ibmmpi)
+#    --mpirun_flags="<flags>"
+#                       defines mpirun/mpiexec flags; must be quoted
+#    --np=<nproc>       defines number of processes
+#    --prefix=<dir>     defines the root multiport directory
+#    --rsh=<rshell>     defines the remote shell command (def: rsh)
+#    --sched=<sched>    defines scheduler <sched>={lsf|sge}
+#    (mpi-specific)
+#    --dplacedir=<dir>  defines location for SGI dplace
+#
+# output:
+#    - return arg: 0 on success; non-zero otherwise
+#    - errors and warnings output to stderr and stdout
+#
+# note(s):
+#  - this program is intended to stand alone and should not rely on
+#    environment variables; all input should be passed via input arguments.
+#
+# implementation note(s):
+#  - variables with "FS" prefix (e.g. FS_ARCH) indicate file-scope variables
+#  - needed functions:
+#    - parallel_get_hostlist (parallel_utility)
+#    - parallel_create_hostfile (")
+#    - parallel_mpd_start (parallel_mpd)
+#    - parallel_mpd_stop (")
+#    - sys_prepend_ld_library_path (sys_utility)
+#
+
+#------------------------------------------------------------------------------
+openmpi_run ()
+{
+    # note(s):
+    #  - add MPI lib directory to shared lib path so mpirun can pick up
+    #    libraries.  This is needed for mpirun; the application can get 
+    #    LD_LIBRARY_PATH set with via the --prefix option mpirun.
+    #  - OPAL_PREFIX is needed to re-root the installation.
+
+    # set and export MPI location (OPENMPI_ROOT variable)
+
+    echo "*** Using NeSI OpenMPI/srun method to launch MPI Fluent"
+
+    if [ -n "$OPENMPI_ROOT" ]; then
+        echo "***"
+        echo "*** Using locally installed OpenMPI library!"
+        echo "***"
+        echo "*** OPENMPI_ROOT=$OPENMPI_ROOT"
+        echo "***"
+        export OPENMPI_ROOT
+    else
+        module load OpenMPI/.1.6.5-GCC-5.4.0
+        export OPENMPI_ROOT=$EBROOTOPENMPI
+        export MALLOC_CHECK_=1
+    fi
+
+    sys_prepend_ld_library_path "$OPENMPI_ROOT/lib:$OPENMPI_ROOT/lib/openmpi"
+    export OPAL_PREFIX=$OPENMPI_ROOT
+    
+    export OMPI_MCA_mca_component_show_load_errors=0
+    export H_MEMORYLOCKED=infinity
+
+    my_cmdline="srun -n $FS_NPROC $FS_CMD"
+
+    if [ "$FS_ARCH" == "lnamd64" ]; then
+      AFD_ARCH="linx64"; export AFD_ARCH
+    fi
+
+    # start job
+
+    echo Starting $my_cmdline
+    $my_cmdline
+    retval=$?
+
+    return $retval
+}
+#------------------------------------------------------------------------------
+mpich2_run ()
+{
+    # set and export MPI location (MPICH2_ROOT variable)
+    if [ -z "$MPICH2_ROOT" ]; then
+        MPICH2_ROOT=$FS_MPTROOT/mpi/$FS_ARCH/$FS_MPI
+        export MPICH2_ROOT
+    else
+        echo "***"
+        echo "*** Using locally installed MPICH2 library!"
+        echo "***"
+        echo "*** MPICH2_ROOT=$MPICH2_ROOT"
+        echo "***"
+        export MPICH2_ROOT
+    fi
+
+    # pick up MPI shared libraries
+    sys_prepend_ld_library_path "$MPICH2_ROOT/lib:$MPICH2_ROOT/lib64"
+
+    # start mpd daemons
+    # (python directory is currently rooted in multiport/..)
+
+    my_python_dir="`echo $FS_MPTROOT | sed 's/\/multiport[0-9]*\.*[0-9]*//'`"
+    my_python_dir="$my_python_dir/packages/python/$FS_ARCH/bin"
+
+    if [ -n "$FS_CNF" ]; then
+        parallel_mpd_start --bindir=$MPICH2_ROOT/bin --pydir=$my_python_dir \
+            -f $FS_CNF --rsh=$FS_RSHELL
+    else
+        parallel_mpd_start --bindir=$MPICH2_ROOT/bin --pydir=$my_python_dir
+    fi
+
+    # build parallel executable command
+
+    my_cmdline="$MPICH2_ROOT/bin/mpiexec $FS_MPIRUN_FLAGS -genvnone \
+        -genv LD_LIBRARY_PATH $LD_LIBRARY_PATH"
+
+    # consider launch on local node (note: -host option used in
+    # case daemon ring already exists and includes other nodes)
+
+    if [ -z "$FS_CNF" ]; then
+        my_lhost=`hostname`
+        my_cmdline="$my_cmdline -n $FS_NPROC -host $my_lhost $FS_CMD"
+
+    # consider launch on remote nodes: "-host" placement option
+    else
+        my_hostlist=`parallel_get_hostlist -n $FS_NPROC -cnf=$FS_CNF \
+            -keepcolon -space`
+ 
+        # use configure file
+        my_appfile="$FS_TMPDIR/fluent-appfile.$$"
+        echo "#Intel MPI machinefile" > $my_appfile
+        i=0
+        for hostandcount in $my_hostlist
+        do
+            host=`echo $hostandcount | awk -F: '{print $1}'`
+            count=`echo $hostandcount | awk -F: '{print $2}'`
+            echo "$host:$count" >> $my_appfile
+            i=`expr $i + $count`
+        done
+        my_cmdline="$my_cmdline -machinefile $my_appfile -np $i $FS_CMD"
+    fi
+
+    # start job
+
+    echo Starting $my_cmdline
+    $my_cmdline < /dev/null
+
+    # cleanup daemons
+
+    parallel_mpd_stop
+
+    # cleanup temp file
+
+    if [ "X$my_appfile" != "X" ]; then
+        test -f $my_appfile && rm -f $my_appfile
+    fi
+}
+#------------------------------------------------------------------------------
+intel_run ()
+{
+    # note(s):
+    #  - the MPICH2 startup is used; a few Intel-specific mpiexec options
+    #    are just added here before calling the MPICH2 startup.
+    #  - Intel-MPI has problem being used from a dynamically loaded library.
+    #    This may be addressed by (a) preloading the MPI library or
+    #    (b) by or'ing RTLD_GLOBAL when dlopen'ing.  Intel has been notified.
+    #    Dynamic loading of MPI client code is not used any more so this is
+    #    not currently an issue (dynamic linking now used).
+
+    # define interconnect/protocol
+
+    if [ "$FS_ARCH" == "lnia64" ]; then
+      impi_device=ssm  # default
+      case $FS_IC in
+          mpi-auto-selected)
+              impi_device=;;
+          eth | ethernet | default)
+              impi_device=ssm;;
+          shmem)
+              impi_device=shm;;
+          myri | myrinet | ib | infiniband)
+              impi_device=rdssm;;
+      esac
+
+      if [ -n "$impi_device" ]; then
+          FS_MPIRUN_FLAGS="$FS_MPIRUN_FLAGS -genv I_MPI_DEVICE $impi_device"
+          # disable fallback device to avoid possible confusion over performance
+          FS_MPIRUN_FLAGS="$FS_MPIRUN_FLAGS -genv I_MPI_FALLBACK_DEVICE disable"
+      else
+          # enable fallback device when no specific interconnect is chosen
+          FS_MPIRUN_FLAGS="$FS_MPIRUN_FLAGS -genv I_MPI_FALLBACK_DEVICE enable"
+      fi
+    else
+      impi_device=shm:tcp #default
+      case $FS_IC in
+          mpi-auto-selected)
+              impi_device=;;
+          eth | ethernet | default)
+              impi_device=shm:tcp;;
+          shmem)
+              impi_device=shm;;
+          myri | myrinet)
+              impi_device=shm:tmi;;
+          ib | infiniband)
+           case $FS_IC_VARIANT in
+              ofed)
+                  impi_device=shm:ofa;;
+              infinipath)
+                  impi_device=shm:tmi;;
+              dapl)
+                  impi_device=shm:dapl;;
+               *)
+                  impi_device="shm:dapl -genv I_MPI_DAPL_UD enable";;
+              esac
+              ;;
+      esac
+
+      if [ -n "$impi_device" ]; then
+          FS_MPIRUN_FLAGS="$FS_MPIRUN_FLAGS -genv I_MPI_FABRICS $impi_device"
+
+          # disable fallback device to avoid possible confusion over performance
+          FS_MPIRUN_FLAGS="$FS_MPIRUN_FLAGS -genv I_MPI_FALLBACK_DEVICE disable"
+      else
+          # enable fallback device when no specific interconnect is chosen
+          FS_MPIRUN_FLAGS="$FS_MPIRUN_FLAGS -genv I_MPI_FALLBACK_DEVICE enable"
+      fi
+    fi
+
+#    if [ -n "$FL_INTEL_MIC" ]; then
+#      export I_MPI_MIC=enable
+#      FS_MPIRUN_FLAGS="$FS_MPIRUN_FLAGS -genv I_MPI_MIC=enable "
+#    fi
+
+    # use I_MPI_DEBUG 1001 for verbose output
+    FS_MPIRUN_FLAGS="$FS_MPIRUN_FLAGS -genv I_MPI_DEBUG 0"
+
+    # disable pin mode which is binding multiple processes from different
+    # jobs to the same core
+    FS_MPIRUN_FLAGS="$FS_MPIRUN_FLAGS -genv I_MPI_PIN disable"
+
+    # For better performance, suggested by Intel
+    FS_MPIRUN_FLAGS="$FS_MPIRUN_FLAGS -genv I_MPI_ADJUST_REDUCE 2  -genv I_MPI_ADJUST_ALLREDUCE 2 -genv I_MPI_ADJUST_BCAST 1"
+
+    # For supporting mixed hardware
+    FS_MPIRUN_FLAGS="$FS_MPIRUN_FLAGS -genv I_MPI_PLATFORM auto"
+
+    # For better scalability at large runs, suggested by Intel
+    FS_MPIRUN_FLAGS="$FS_MPIRUN_FLAGS -genv I_MPI_DAPL_SCALABLE_PROGRESS 1"
+
+    # may need for rdma devices (see release notes)
+    #FS_MPIRUN_FLAGS="$FS_MPIRUN_FLAGS -genv I_MPI_RDMA_TRANSLATION_CACHE disable"
+
+    # set and export MPI location (INTEL_ROOT variable)
+    # Note: IntelMPI also calls this function
+    if [ -z "$INTELMPI_ROOT" ]; then
+        INTEL_ROOT=$FS_MPTROOT/mpi/$FS_ARCH/$FS_MPI
+        export INTEL_ROOT
+    else
+        echo "***"
+        echo "*** Using locally installed Intel MPI library!"
+        echo "***"
+        echo "*** INTELMPI_ROOT=$INTELMPI_ROOT"
+        echo "***"
+        INTEL_ROOT=$INTELMPI_ROOT
+        export INTEL_ROOT
+    fi
+
+    # pick up MPI shared libraries
+    sys_prepend_ld_library_path "$INTEL_ROOT/lib:$INTEL_ROOT/lib64"
+
+    # start mpd daemons
+    # (python directory is currently rooted in multiport/..)
+
+#    my_python_dir="`echo $FS_MPTROOT | sed 's/\/multiport[0-9]*\.*[0-9]*//'`"
+#    my_python_dir="$my_python_dir/packages/python/$FS_ARCH/bin"
+
+#    PATH="$INTEL_ROOT/bin:$my_python_dir:$PATH"
+    PATH="$INTEL_ROOT/bin:$PATH"
+    export PATH
+
+    if [ -n "$FS_CNF" -o -n "$FS_MIC_CNF" ]; then
+      if [ -z "$SCHEDULER_RSH" ]; then
+        mpdargs="--rsh=$FS_RSHELL"
+      else
+        if [ -n "$PBS_ENABLED" ]; then
+           mpdargs="-bootstrap pbsdsh"
+        elif [ -n "$LSF_ENABLED" ]; then
+           mpdargs="-bootstrap lsf"
+        elif [ -n "$SGE_ENABLED" ]; then
+           mpdargs="-bootstrap sge"
+        fi
+      fi
+    fi
+
+    if [ -n "$PYTHONHOME" ]; then
+      FS_MPIRUN_FLAGS="$FS_MPIRUN_FLAGS -genv PYTHONHOME $PYTHONHOME"
+    fi
+    # add flux root command
+    if [ -n "$AFD_ROOT" ]; then
+       FS_MPIRUN_FLAGS="$FS_MPIRUN_FLAGS -genv AFD_ROOT $AFD_ROOT" 
+       if [ "$FS_ARCH" == "lnamd64" ]; then
+         AFD_ARCH="linx64"
+       fi
+       if [ -n "$AFD_ARCH" ]; then
+         FS_MPIRUN_FLAGS="$FS_MPIRUN_FLAGS -genv AFD_ARCH $AFD_ARCH"
+       fi
+    fi
+    if [ -n "$FLUENT_PROD_DIR" ]; then
+       FS_MPIRUN_FLAGS="$FS_MPIRUN_FLAGS -genv FLUENT_PROD_DIR $FLUENT_PROD_DIR"
+    fi
+
+    if [ -n "$FLUENT_AFFINITY" ]; then
+       FS_MPIRUN_FLAGS="$FS_MPIRUN_FLAGS -genv FLUENT_AFFINITY $FLUENT_AFFINITY"
+    fi
+
+    if [ -n "$FLUENT_KMP_AFFINITY" ]; then
+       FS_MPIRUN_FLAGS="$FS_MPIRUN_FLAGS -genv KMP_AFFINITY=disabled"
+    fi
+
+    # Preloading Intel MPI MT (thread safe) library
+#    if [ "$FS_ARCH" == "lnamd64" -a -z "$FL_INTEL_MIC" ]; then
+    if [ "$FS_ARCH" == "lnamd64" ]; then
+      FS_MPIRUN_FLAGS="$FS_MPIRUN_FLAGS -genv LD_PRELOAD $INTEL_ROOT/lib/libmpi_mt.so"
+    fi
+
+    # Add MIC multipiort shared library path
+
+    # build parallel executable command
+#using -genvnone is causing issues with mixed win/linux runs for s2s cases. So, removing it.
+#    my_cmdline="$FS_MPIRUN_FLAGS -genvnone -genv LD_LIBRARY_PATH $LD_LIBRARY_PATH"
+
+     if [ -f "/etc/tmi.conf" ] ; then
+        my_cmdline="$FS_MPIRUN_FLAGS"
+     else
+        my_cmdline="$FS_MPIRUN_FLAGS -genv TMI_CONFIG $INTEL_ROOT/etc/tmi.conf"
+     fi
+
+    # consider launch on local node (note: -host option used in
+    # case daemon ring already exists and includes other nodes)
+
+    if [ -z "$FS_CNF" ]; then
+        my_lhost=`hostname`
+        my_appfile="$FS_TMPDIR/fluent-appfile.$USER.$$"
+        echo "#Intel MPI machinefile" > $my_appfile
+        echo "$my_lhost" >> $my_appfile
+        my_cmdline=" -f $my_appfile $my_cmdline -n $FS_NPROC -host $my_lhost $FS_CMD"
+
+    # consider launch on remote nodes: "-host" placement option
+    else
+        # use configure file
+        my_appfile="$FS_TMPDIR/fluent-appfile.$USER.$$"
+        echo "#Intel MPI machinefile" > $my_appfile
+
+        if [ -n "$FS_CNF" ]; then
+          my_hostlist=`parallel_get_hostlist -n $FS_NPROC -cnf=$FS_CNF -space`
+
+          i=0
+          for hostandcount in $my_hostlist
+          do
+#            host=`echo $hostandcount | awk -F: '{print $1}'`
+#            count=`echo $hostandcount | awk -F: '{print $2}'`
+              echo "$hostandcount" >> $my_appfile
+#            echo "$host:$count" >> $my_appfile
+#            i=`expr $i + $count`
+              i=`expr $i + 1`
+          done
+        fi
+#        my_cmdline="$my_cmdline -machinefile $my_appfile -np $i $FS_CMD"
+
+        my_cmdline="$my_cmdline -machinefile $my_appfile -np $i $FS_CMD"
+        mpdargs="-f $my_appfile $mpdargs"
+    fi
+    my_cmdline="$INTEL_ROOT/bin/mpirun $mpdargs $my_cmdline"
+
+    # start job
+
+    echo Starting $my_cmdline
+    $my_cmdline < /dev/null
+    retval=$?
+
+    # cleanup temp file
+
+    if [ "X$my_appfile" != "X" ]; then
+        test -f $my_appfile && rm -f $my_appfile
+    fi
+
+    return $retval
+}
+#------------------------------------------------------------------------------
+ibmmpi_run ()
+{
+    # set system
+    ibmmpi_system=linux
+    case $FS_ARCH in
+        hpux*) ibmmpi_system=hpux;;
+        *)     ibmmpi_system=linux;;
+    esac
+
+    # check for srun (SLURM) or prun (quadrics RSM)
+
+    ibmmpi_start_mode=default
+    if [ "$ibmmpi_system" = "linux" ]; then
+        if [ -n "$SLURM_ENABLED" ]; then
+            ibmmpi_start_mode=SRUN
+            # check for XC system
+            grep -q XCsmp /proc/version
+            if [ $? -eq 0 ] ; then
+                PATH=$PATH:/opt/hptc/bin
+            fi
+        elif [ -x /usr/bin/prun -a -x /usr/bin/rinfo ]; then
+            ibmmpi_start_mode=PRUN
+            # note: specification of quadrics ELAN is based on input
+            # using -pquadrics
+        fi
+    fi
+
+    # set remote shell option (just needed where mpirun is used)
+    # (in HP-MPI 2.2, ssh is default but rsh is default in fluent so
+    # always specify; hpux seems to need full path)
+
+    MPI_REMSH=$FS_RSHELL
+    if [ "$ibmmpi_system" = "hpux" ]; then
+        MPI_REMSH=/usr/bin/$MPI_REMSH
+    fi
+    export MPI_REMSH
+    # -e option only in >=2.1; hp-ux has 2.0
+    #HPMPI_MPIRUN_FLAGS="$HPMPI_MPIRUN_FLAGS -e MPI_REMSH=$MPI_REMSH"
+
+    # set and export MPI location (MPI_ROOT variable)
+    # note: the root directory must contain: 1) bin and 2) lib/<arch>
+    # where <arch>={linux_ia32, linux_ia64, etc.}.
+    # the library path is modified accordingly by mpirun so it does
+    # not need to be modified here to pick up libmpi.so
+
+    if [ -z "$MPI_ROOT" ]; then
+       MPI_ROOT=$FS_MPTROOT/mpi/$FS_ARCH/$FS_MPI
+       export MPI_ROOT
+    else
+        echo "***"
+        echo "*** Using locally installed IBM-MPI library!"
+        echo "***"
+        echo "*** MPI_ROOT=$MPI_ROOT"
+        echo "*** IBMMPI_MPIRUN_FLAGS=$IBMMPI_MPIRUN_FLAGS"
+        echo "*** PARA_MPIRUN_FLAGS=$FS_MPIRUN_FLAGS"
+        echo "***"
+    fi
+
+
+    # determine interconnect/protocol-specific flags
+    #
+    #  - HP-MPI malloc is now used, and special treatments are no long needed
+    #    to handle the situation of NOT using the HP-MPI malloc.  The HP-MPI
+    #    malloc now comes into the applicaton by linking the MPI wrapper with
+    #    -Wl,-f,libmpi.so.1 to force HP-MPI to load before libc.
+    #
+    #    Previously, when the HP-MPI malloc was NOT used, special treatment
+    #    was needed for gm, vapi, and dapl.  This special treatment involved:
+    #      a) setting -ndd to avoid deferred deregistration
+    #      b) using MPI_USE_MALLOPT_SBRK_PROTECTION and
+    #         MPI_USE_MALLOPT_AVOID_MMAP.
+    #    Option (a) had performance penalities while option (b) had memory
+    #    penalities.
+    #    - MPI_USE_MMALLOPT_AVOID_MMAP=1 Instructs the underlying malloc
+    #      implementation to avoid mmaps and instead use sbrk() to get all
+    #      the memory used. The default is MPI_USE_MALLOPT_AVOID_MMAP=0
+    #  - rely on platform mpi finding drivers/libraries via ld.so.conf or
+    #    other mechanism; if this does not work, user may manually
+    #    define the library locations by modifying LD_LIBRARY_PATH
+    #
+
+    my_envvars=
+    my_protocol=tcp
+    case $FS_IC in
+        mpi-auto-selected)
+            my_protocol=mpi-auto-selected
+            IBMMPI_MPIRUN_FLAGS="$IBMMPI_MPIRUN_FLAGS"
+            ;;
+        eth | ethernet | vendor | default)
+            my_protocol=tcp
+            ;;
+        myri | myrinet)
+            case $FS_IC_VARIANT in
+            gm)
+                my_protocol=gm;;
+            *)
+                my_protocol=mx;;
+            esac
+            ;;
+        quadrics)
+            my_protocol=elan
+            ;;
+        ib | infiniband)
+            case $FS_IC_VARIANT in
+            mellanox)
+                # use DAPL on lnx86/mellanox; work around HP VAPI bug
+                if [ "$FS_ARCH" = "lnx86" ]; then
+                    my_protocol=dapl
+                else
+                    my_protocol=vapi
+                fi
+                ;;
+            dapl | silverstorm)
+                my_protocol=dapl;;
+            ofedft)
+                my_protocol=ibvft;;
+            infinipath)
+                my_protocol=psm
+                IBMMPI_MPIRUN_FLAGS="$IBMMPI_MPIRUN_FLAGS"
+                my_envvars="-e IPATH_NO_CPUAFFINITY=1 $my_envvars"
+                ;;
+            vapi)
+                my_protocol=vapi;;
+            ofed | *)
+                my_protocol=ibv;;
+            esac
+            ;;
+    esac
+
+    if [ "$ibmmpi_system" = "hpux" ]; then
+       # using hpmpi 2.0 on hpux which does not support protocol flag
+        my_protocol=default
+    fi
+
+    # (set specific flags)
+
+    case $my_protocol in
+    default)
+        my_protocol_flags=
+        ;;
+    mpi-auto-selected)
+        my_protocol_flags=
+        ;;
+    tcp)
+        my_protocol_flags="-TCP"
+        ;;
+    gm)
+        my_protocol_flags="-prot -GM"
+        ;;
+    mx)
+        # MX_RCACHE=0 to avoid "regcache incompatible with malloc" warnings
+        my_protocol_flags="-prot -MX -e MX_RCACHE=0"
+        ;;
+    elan)
+        my_protocol_flags="-prot -elan"
+        # tell elan to use 30 instead of SIGUSR2; use elan collectives;
+        export LIBELAN4_TRAPSIG=30
+        export MPI_USE_LIBELAN=1
+        ;;
+    vapi)
+        my_protocol_flags="-prot -vapi -e MPI_HASIC_VAPI=1"
+        if [ $FS_NPROC -gt 1024 ] ; then
+            my_protocol_flags="$my_protocol_flags -rdma"
+        fi
+        ;;
+    dapl)
+        my_protocol_flags="-prot -udapl -e MPI_HASIC_UDAPL=1"
+        if [ $FS_NPROC -gt 1024 ] ; then
+            my_protocol_flags="$my_protocol_flags -rdma"
+        fi
+        ;;
+    ibvft)
+        my_protocol_flags="-prot -IBV -e MPI_HASIC_IBV=1 -e MPI_HA_NW_PORT_FAILOVER=1 -ha"
+        if [ $FS_NPROC -gt 1024 ] ; then
+            my_protocol_flags="$my_protocol_flags -rdma"
+        fi
+        ;;
+    ibv)
+        my_protocol_flags="-prot -IBV -e MPI_HASIC_IBV=1"
+        if [ $FS_NPROC -gt 1024 ] ; then
+            my_protocol_flags="$my_protocol_flags -rdma"
+        fi
+        ;;
+    psm)
+        my_protocol_flags="-prot -PSM -e MPI_HASIC_PSM=1"
+        if [ $FS_NPROC -gt 1024 ] ; then
+            my_protocol_flags="$my_protocol_flags -rdma"
+        fi
+        ;;
+    *)
+        echo "Error: Invalid interconnect syntax: $FS_IC"
+        exit 1
+        ;;
+    esac
+
+    if [ -z "$FLUENT_MALLOPT_SETTING" ]; then
+      IBMMPI_MPIRUN_FLAGS="-e MPI_USE_MALLOPT_MMAP_MAX=0 $IBMMPI_MPIRUN_FLAGS"
+    elif [ "$FLUENT_MALLOPT_SETTING" -eq 1 ] ; then
+      IBMMPI_MPIRUN_FLAGS="-e MPI_USE_MALLOPT_MMAP_MAX=0 $IBMMPI_MPIRUN_FLAGS"
+    fi
+
+    if [ -z "$FLUENT_FORK_SAFE" ]; then
+      IBMMPI_MPIRUN_FLAGS="-e MPI_IBV_NO_FORK_SAFE=1 $IBMMPI_MPIRUN_FLAGS"
+    fi
+
+    #
+    # srun execution (XC and non-XC systems) 
+    #
+    if [ "$ibmmpi_start_mode" = "SRUN" ] ; then
+        echo "-- srun ibmmpi launch --"
+        export LIBELAN4_TRAPSIG=30
+        my_cmdline="$MPI_ROOT/bin/mpirun $IBMMPI_MPIRUN_FLAGS \
+            $FS_MPIRUN_FLAGS $my_protocol_flags -srun $IBMMPI_SRUN_FLAGS \
+            -n $FS_NPROC $FS_CMD"
+    #
+    # prun execution (mainly for Elan)  
+    #
+    elif [ "$ibmmpi_start_mode" = "PRUN" ] ; then
+        echo "-- prun ibmmpi launch --"
+        # fix prun unstability because of file descriptors status
+        # (open standard input from /dev/null and close descriptor 6)
+        fixfiledes() {
+           "$@" < /dev/null 6>&-
+        }
+        # MPI_PRUNOPTION: set to keep mpirun from using -O in prun
+        # (-O allows processor overloading)
+        if [ -z "$MPI_PRUNOPTION" ]; then
+            export MPI_PRUNOPTION=
+        fi
+
+        my_cmdline="fixfiledes $MPI_ROOT/bin/mpirun $IBMMPI_MPIRUN_FLAGS \
+             $FS_MPIRUN_FLAGS $my_protocol_flags -prun $IBMMPI_PRUN_FLAGS \
+            -n $FS_NPROC $FS_CMD"
+    #
+    # generic (single-host, appfile, and non-XC LSF) execution  
+    #
+    else
+      if [ -z "$SCHEDULER_RSH" ]; then
+        my_cmdline="$MPI_ROOT/bin/mpirun $IBMMPI_MPIRUN_FLAGS $FS_MPIRUN_FLAGS"
+      else
+        if [ -n "$LSF_ENABLED" ]; then
+         my_cmdline="$MPI_ROOT/bin/mpirun -lsf -e MPI_USELSF_VERSION=9 $IBMMPI_MPIRUN_FLAGS $FS_MPIRUN_FLAGS"
+        else # For other schedulers no native support from IBM MPI
+           my_cmdline="$MPI_ROOT/bin/mpirun $IBMMPI_MPIRUN_FLAGS $FS_MPIRUN_FLAGS"
+        fi
+      fi
+
+        # enable one-sided communication; MPI_SHMEMCNTL defines # of envelops,
+        # shared memory for message passing, and shared memory for generic
+        # memory (MPI_Alloc_mem).
+ 
+        #*** not completely tested & current memory partitioning only works
+        # for 4 or less processes per machine. ***
+        #my_cmdline="$my_cmdline -1sided -e MPI_SHMEMCNTL=8,1048576,4194304"
+        #FS_CMD="$FS_CMD -mpi2tested"
+
+        #
+        # appfile execution; create appfile based on specified host list
+        #
+        if [ -n "$FS_CNF" ]; then
+
+            my_cmdline="$my_cmdline $my_protocol_flags"
+
+            # create hostlist of form: <host1>:<ncpu1> <host2>:<ncpu2> ...
+
+            my_hostlist=`parallel_get_hostlist -n $FS_NPROC -cnf=$FS_CNF \
+                -keepcolon -space`
+
+            ENV_CMD=
+
+            # set environment variable list (note: MPI_WORKDIR is set
+            # to address performance issues the with pvfs2 file system)
+
+            # this causes problems when cwd is local
+            #my_envvars="-e MPI_WORKDIR=`pwd` $my_envvars"
+            my_envvars="-e LD_LIBRARY_PATH=$LD_LIBRARY_PATH $my_envvars"
+            my_envvars="-e PATH=`echo $PATH` $my_envvars"
+            if [ -n "$FLUENT_KMP_AFFINITY" ]; then
+               my_envvars="-e KMP_AFFINITY=disabled $my_envvars"
+            fi
+            if [ -n "$PYTHONHOME" ]; then
+              my_envvars="-e PYTHONHOME=$PYTHONHOME $my_envvars"
+            fi
+            if [ -n "$AFD_ROOT" ]; then
+               my_envvars="-e AFD_ROOT=$AFD_ROOT $my_envvars"
+               if [ "$FS_ARCH" == "lnamd64" ]; then
+                 AFD_ARCH="linx64"
+               fi
+               if [ -n "$AFD_ARCH" ]; then
+                 my_envvars="-e AFD_ARCH=$AFD_ARCH $my_envvars"
+               fi
+            fi
+            if [ -n "$FLUENT_PROD_DIR" ]; then
+               my_envvars="-e FLUENT_PROD_DIR=$FLUENT_PROD_DIR $my_envvars"
+            fi
+
+            if [ -n "$FLUENT_AFFINITY" ]; then
+               my_envvars="-e FLUENT_AFFINITY=$FLUENT_AFFINITY $my_envvars"
+            fi
+
+            if [ "$ibmmpi_system" = "hpux" ]; then
+                if [ -n "$SHLIB_PATH" ]; then
+                    my_envvars="-e SHLIB_PATH=$SHLIB_PATH $my_envvars" 
+                fi
+                if [ -n "$LD_PRELOAD" ]; then
+                    if [ -z "$MP_NUMBER_OF_THREADS" ]; then
+                        MP_NUMBER_OF_THREADS=1
+                        export MP_NUMBER_OF_THREADS=1
+                    fi
+                    my_envvars="-e LD_PRELOAD=$LD_PRELOAD \
+                        -e MP_NUMBER_OF_THREADS=$MP_NUMBER_OF_THREADS \
+                        $my_envvars" 
+                fi
+            fi
+
+            # create appfile; fluent node executable launched directly from
+            # mpirun via appfile.
+
+            my_appfile="$FS_TMPDIR/fluent-appfile.$USER.$$"
+
+            echo "# IBM-MPI app file" > $my_appfile
+            for hostandcount in $my_hostlist
+            do
+                host=`echo $hostandcount | awk -F: '{print $1}'`
+                count=`echo $hostandcount | awk -F: '{print $2}'`
+
+                echo "-h $host -np $count $my_envvars $ENV_CMD $FS_CMD" \
+                    >> $my_appfile
+            done
+
+            my_cmdline="$my_cmdline -f $my_appfile";
+        #
+        # single-host execution
+        #
+        else
+            # Need to switch off IB detect due to a hang issue on RH4.  Note
+            # this is only done for single node runs where it does not matter.
+            MPI_IC_ORDER="TCP"
+            export MPI_IC_ORDER
+            my_cmdline="$my_cmdline -np $FS_NPROC $FS_CMD"
+        fi
+    fi
+
+    # start job
+
+    echo Starting $my_cmdline
+    $my_cmdline
+    retval=$?
+
+    # cleanup temp file
+
+    if [ "X$my_appfile" != "X" ]; then
+        test -f $my_appfile && rm -f $my_appfile
+    fi
+
+    return $retval
+}
+#------------------------------------------------------------------------------
+
+hp_run ()
+{
+    # set system
+    hpmpi_system=linux
+    case $FS_ARCH in
+        hpux*) hpmpi_system=hpux;;
+        *)     hpmpi_system=linux;;
+    esac
+
+    # check for srun (SLURM) or prun (quadrics RSM)
+
+    hpmpi_start_mode=default
+    if [ "$hpmpi_system" = "linux" ]; then
+        if [ -n "$SLURM_ENABLED" ]; then
+            hpmpi_start_mode=SRUN
+            # check for XC system
+            grep -q XCsmp /proc/version
+            if [ $? -eq 0 ] ; then
+                PATH=$PATH:/opt/hptc/bin
+            fi
+        elif [ -x /usr/bin/prun -a -x /usr/bin/rinfo ]; then
+            hpmpi_start_mode=PRUN
+            # note: specification of quadrics ELAN is based on input
+            # using -pquadrics
+        fi
+    fi
+
+    # set remote shell option (just needed where mpirun is used)
+    # (in HP-MPI 2.2, ssh is default but rsh is default in fluent so
+    # always specify; hpux seems to need full path)
+
+    MPI_REMSH=$FS_RSHELL
+    if [ "$hpmpi_system" = "hpux" ]; then
+        MPI_REMSH=/usr/bin/$MPI_REMSH
+    fi
+    export MPI_REMSH
+    # -e option only in >=2.1; hp-ux has 2.0
+    #HPMPI_MPIRUN_FLAGS="$HPMPI_MPIRUN_FLAGS -e MPI_REMSH=$MPI_REMSH"
+
+    # set and export MPI location (MPI_ROOT variable)
+    # note: the root directory must contain: 1) bin and 2) lib/<arch>
+    # where <arch>={linux_ia32, linux_ia64, etc.}.
+    # the library path is modified accordingly by mpirun so it does
+    # not need to be modified here to pick up libmpi.so
+
+    if [ -z "$MPI_ROOT" ]; then
+        if [ "$FLUENT_USE_HP231" = "1" ]; then
+            MPI_ROOT=$FS_MPTROOT/mpi/$FS_ARCH/$FS_MPI-2.03.01
+            export MPI_ROOT
+        else
+            MPI_ROOT=$FS_MPTROOT/mpi/$FS_ARCH/$FS_MPI
+            export MPI_ROOT
+        fi
+    else
+        echo "***"
+        echo "*** Using locally installed HP-MPI library!"
+        echo "***"
+        echo "*** MPI_ROOT=$MPI_ROOT"
+        echo "*** HPMPI_MPIRUN_FLAGS=$HPMPI_MPIRUN_FLAGS"
+        echo "*** PARA_MPIRUN_FLAGS=$FS_MPIRUN_FLAGS"
+        echo "***"
+    fi
+
+
+    # determine interconnect/protocol-specific flags
+    #
+    #  - HP-MPI malloc is now used, and special treatments are no long needed
+    #    to handle the situation of NOT using the HP-MPI malloc.  The HP-MPI
+    #    malloc now comes into the applicaton by linking the MPI wrapper with
+    #    -Wl,-f,libmpi.so.1 to force HP-MPI to load before libc.
+    #
+    #    Previously, when the HP-MPI malloc was NOT used, special treatment
+    #    was needed for gm, vapi, and dapl.  This special treatment involved:
+    #      a) setting -ndd to avoid deferred deregistration
+    #      b) using MPI_USE_MALLOPT_SBRK_PROTECTION and
+    #         MPI_USE_MALLOPT_AVOID_MMAP.
+    #    Option (a) had performance penalities while option (b) had memory
+    #    penalities.
+    #    - MPI_USE_MMALLOPT_AVOID_MMAP=1 Instructs the underlying malloc
+    #      implementation to avoid mmaps and instead use sbrk() to get all
+    #      the memory used. The default is MPI_USE_MALLOPT_AVOID_MMAP=0
+    #  - rely on platform mpi finding drivers/libraries via ld.so.conf or
+    #    other mechanism; if this does not work, user may manually
+    #    define the library locations by modifying LD_LIBRARY_PATH
+    #
+
+    my_envvars=
+    my_protocol=tcp
+    case $FS_IC in
+        mpi-auto-selected)
+            my_protocol=mpi-auto-selected
+            HPMPI_MPIRUN_FLAGS="$HPMPI_MPIRUN_FLAGS"
+            ;;
+        eth | ethernet | vendor | default)
+            my_protocol=tcp
+            ;;
+        myri | myrinet)
+            case $FS_IC_VARIANT in
+            gm)
+                my_protocol=gm;;
+            *)
+                my_protocol=mx;;
+            esac
+            ;;
+        quadrics)
+            my_protocol=elan
+            ;;
+        ib | infiniband)
+            case $FS_IC_VARIANT in
+            mellanox)
+                # use DAPL on lnx86/mellanox; work around HP VAPI bug
+                if [ "$FS_ARCH" = "lnx86" ]; then
+                    my_protocol=dapl
+                else
+                    my_protocol=vapi
+                fi
+                ;;
+            dapl | silverstorm)
+                my_protocol=dapl;;
+            ofedft)
+                my_protocol=ibvft;;
+            infinipath)
+                my_protocol=psm
+                HPMPI_MPIRUN_FLAGS="$HPMPI_MPIRUN_FLAGS"
+                my_envvars="-e IPATH_NO_CPUAFFINITY=1 $my_envvars"
+                ;;
+            vapi)
+                my_protocol=vapi;;
+            ofed | *)
+                my_protocol=ibv;;
+            esac
+            ;;
+    esac
+
+    if [ "$hpmpi_system" = "hpux" ]; then
+       # using hpmpi 2.0 on hpux which does not support protocol flag
+        my_protocol=default
+    fi
+
+    # (set specific flags)
+
+    case $my_protocol in
+    default)
+        my_protocol_flags=
+        ;;
+    mpi-auto-selected)
+        my_protocol_flags=
+        ;;
+    tcp)
+        my_protocol_flags="-TCP"
+        ;;
+    gm)
+        my_protocol_flags="-prot -GM"
+        ;;
+    mx)
+        # MX_RCACHE=0 to avoid "regcache incompatible with malloc" warnings
+        my_protocol_flags="-prot -MX -e MX_RCACHE=0"
+        ;;
+    elan)
+        my_protocol_flags="-prot -elan"
+        # tell elan to use 30 instead of SIGUSR2; use elan collectives;
+        export LIBELAN4_TRAPSIG=30
+        export MPI_USE_LIBELAN=1
+        ;;
+    vapi)
+        my_protocol_flags="-prot -vapi -e MPI_HASIC_VAPI=1"
+        if [ $FS_NPROC -gt 1024 ] ; then
+            my_protocol_flags="$my_protocol_flags -srq"
+        fi
+        ;;
+    dapl)
+        my_protocol_flags="-prot -udapl -e MPI_HASIC_UDAPL=1"
+        if [ $FS_NPROC -gt 1024 ] ; then
+            my_protocol_flags="$my_protocol_flags -srq"
+        fi
+        ;;
+    ibvft)
+        my_protocol_flags="-prot -IBV -e MPI_HASIC_IBV=1 -e MPI_HA_NW_PORT_FAILOVER=1 -ha"
+        if [ $FS_NPROC -gt 1024 ] ; then
+            my_protocol_flags="$my_protocol_flags -srq"
+        fi
+        ;;
+    ibv)
+        my_protocol_flags="-prot -IBV -e MPI_HASIC_IBV=1"
+        if [ $FS_NPROC -gt 1024 ] ; then
+            my_protocol_flags="$my_protocol_flags -srq"
+        fi
+        ;;
+    psm)
+        my_protocol_flags="-prot -PSM -e MPI_HASIC_PSM=1"
+        if [ $FS_NPROC -gt 1024 ] ; then
+            my_protocol_flags="$my_protocol_flags -srq"
+        fi
+        ;;
+    *)
+        echo "Error: Invalid interconnect syntax: $FS_IC"
+        exit 1
+        ;;
+    esac
+
+    #
+    # srun execution (XC and non-XC systems) 
+    #
+    if [ "$hpmpi_start_mode" = "SRUN" ] ; then
+        echo "-- srun hp-mpi launch --"
+        export LIBELAN4_TRAPSIG=30
+        my_cmdline="$MPI_ROOT/bin/mpirun $HPMPI_MPIRUN_FLAGS \
+            $FS_MPIRUN_FLAGS $my_protocol_flags -srun $HPMPI_SRUN_FLAGS \
+            -n $FS_NPROC $FS_CMD"
+    #
+    # prun execution (mainly for Elan)  
+    #
+    elif [ "$hpmpi_start_mode" = "PRUN" ] ; then
+        echo "-- prun hp-mpi launch --"
+        # fix prun unstability because of file descriptors status
+        # (open standard input from /dev/null and close descriptor 6)
+        fixfiledes() {
+           "$@" < /dev/null 6>&-
+        }
+        # MPI_PRUNOPTION: set to keep mpirun from using -O in prun
+        # (-O allows processor overloading)
+        if [ -z "$MPI_PRUNOPTION" ]; then
+            export MPI_PRUNOPTION=
+        fi
+
+        my_cmdline="fixfiledes $MPI_ROOT/bin/mpirun $HPMPI_MPIRUN_FLAGS \
+             $FS_MPIRUN_FLAGS $my_protocol_flags -prun $HPMPI_PRUN_FLAGS \
+            -n $FS_NPROC $FS_CMD"
+    #
+    # generic (single-host, appfile, and non-XC LSF) execution  
+    #
+    else
+
+        my_cmdline="$MPI_ROOT/bin/mpirun $HPMPI_MPIRUN_FLAGS $FS_MPIRUN_FLAGS"
+
+        # enable one-sided communication; MPI_SHMEMCNTL defines # of envelops,
+        # shared memory for message passing, and shared memory for generic
+        # memory (MPI_Alloc_mem).
+ 
+        #*** not completely tested & current memory partitioning only works
+        # for 4 or less processes per machine. ***
+        #my_cmdline="$my_cmdline -1sided -e MPI_SHMEMCNTL=8,1048576,4194304"
+        #FS_CMD="$FS_CMD -mpi2tested"
+
+        #
+        # appfile execution; create appfile based on specified host list
+        #
+        if [ -n "$FS_CNF" ]; then
+
+            my_cmdline="$my_cmdline $my_protocol_flags"
+
+            # create hostlist of form: <host1>:<ncpu1> <host2>:<ncpu2> ...
+
+            my_hostlist=`parallel_get_hostlist -n $FS_NPROC -cnf=$FS_CNF \
+                -keepcolon -space`
+
+            ENV_CMD=
+
+            # set environment variable list (note: MPI_WORKDIR is set
+            # to address performance issues the with pvfs2 file system)
+
+            # this causes problems when cwd is local
+            #my_envvars="-e MPI_WORKDIR=`pwd` $my_envvars"
+            my_envvars="-e LD_LIBRARY_PATH=$LD_LIBRARY_PATH $my_envvars"
+            my_envvars="-e PATH=`echo $PATH` $my_envvars"
+            if [ -n "$PYTHONHOME" ]; then
+              my_envvars="-e PYTHONHOME=$PYTHONHOME $my_envvars"
+            fi
+            if [ -n "$AFD_ROOT" ]; then
+               my_envvars="-e AFD_ROOT=$AFD_ROOT $my_envvars"
+               if [ "$FS_ARCH" == "lnamd64" ]; then
+                 AFD_ARCH="linx64"
+               fi
+               if [ -n "$AFD_ARCH" ]; then
+                 my_envvars="-e AFD_ARCH=$AFD_ARCH $my_envvars"
+               fi
+            fi
+            if [ -n "$FLUENT_PROD_DIR" ]; then
+               my_envvars="-e FLUENT_PROD_DIR=$FLUENT_PROD_DIR $my_envvars"
+            fi
+
+            if [ "$hpmpi_system" = "hpux" ]; then
+                if [ -n "$SHLIB_PATH" ]; then
+                    my_envvars="-e SHLIB_PATH=$SHLIB_PATH $my_envvars" 
+                fi
+                if [ -n "$LD_PRELOAD" ]; then
+                    if [ -z "$MP_NUMBER_OF_THREADS" ]; then
+                        MP_NUMBER_OF_THREADS=1
+                        export MP_NUMBER_OF_THREADS=1
+                    fi
+                    my_envvars="-e LD_PRELOAD=$LD_PRELOAD \
+                        -e MP_NUMBER_OF_THREADS=$MP_NUMBER_OF_THREADS \
+                        $my_envvars" 
+                fi
+            fi
+
+            # create appfile; fluent node executable launched directly from
+            # mpirun via appfile.
+
+            my_appfile="$FS_TMPDIR/fluent-appfile.$USER.$$"
+
+            echo "# HP-MPI app file" > $my_appfile
+            for hostandcount in $my_hostlist
+            do
+                host=`echo $hostandcount | awk -F: '{print $1}'`
+                count=`echo $hostandcount | awk -F: '{print $2}'`
+
+                echo "-h $host -np $count $my_envvars $ENV_CMD $FS_CMD" \
+                    >> $my_appfile
+            done
+
+            my_cmdline="$my_cmdline -f $my_appfile";
+        #
+        # single-host execution
+        #
+        else
+            # Need to switch off IB detect due to a hang issue on RH4.  Note
+            # this is only done for single node runs where it does not matter.
+            MPI_IC_ORDER="TCP"
+            export MPI_IC_ORDER
+            my_cmdline="$my_cmdline -np $FS_NPROC $FS_CMD"
+        fi
+    fi
+
+    # start job
+
+    echo Starting $my_cmdline
+    $my_cmdline
+    retval=$?
+
+    # cleanup temp file
+
+    if [ "X$my_appfile" != "X" ]; then
+        test -f $my_appfile && rm -f $my_appfile
+    fi
+
+    return $retval
+}
+#------------------------------------------------------------------------------
+
+sgi_run ()
+{
+    my_mpi_dir=$FS_MPTROOT/mpi/$FS_ARCH/$FS_MPI
+
+    if [ "$FS_ARCH" != "lnia64" ]; then
+        echo "Error: sgi-mpi only valid for lnia64"
+        exit 1
+    fi
+
+    # make one-sided communication available and make it the default
+ 
+if [ "$FS_PROD" = "fluent" ]; then
+    FS_CMD="$FS_CMD -mpi2tested"
+fi
+
+    # Placement for binaries
+
+    MPI_DSM_DISTRIBUTE=1
+    export MPI_DSM_DISTRIBUTE
+
+    # get hostlist and check that hostlist contains only one unique host
+
+    my_host=
+    if [ -n "$FS_CNF" ]; then
+        # create hostlist of form: <host1> [<host2> ...]
+        my_hostlist=`parallel_get_hostlist -n $FS_NPROC -cnf=$FS_CNF -space`
+        my_host=`echo $my_hostlist | awk '{print $1}'`
+        for host in $my_hostlist
+        do
+            if [ "$host" != "$my_host" ]; then
+                printf "%s%s\n" "Error: configuration contains more than " \
+                    "one host: $my_host and $host"
+                exit 1
+            fi
+        done
+    fi
+
+    # create command line
+    # (ensure LD_LIBRARY_PATH is set in environment where fluent
+    # is started.  this is needs to be done because mpirun may
+    # overwrite current value by calling .cshrc.)
+
+    my_cmdline="/usr/bin/mpirun $my_host $FS_MPIRUN_FLAGS \
+        -np $FS_NPROC env LD_LIBRARY_PATH=${LD_LIBRARY_PATH} $FS_CMD"
+
+    # start job
+
+    echo Starting $my_cmdline
+
+if [ "$FS_PROD" = "fluent" ]; then
+    $my_cmdline &
+else
+    $my_cmdline
+fi
+}
+#------------------------------------------------------------------------------
+cray_run ()
+{
+    if [ -z "$CRAY_MPI_HOME" ]; then
+        CRAY_MPI_HOME=$FS_MPTROOT/mpi/$FS_ARCH/$FS_MPI
+    fi
+    export LD_LIBRARY_PATH="$CRAY_MPI_HOME/lib:$LD_LIBRARY_PATH"
+
+    if [ -n "$FLUENT_USE_CRAY_MPT5" ]; then
+       sys_prepend_ld_library_path "$FS_MPTROOT/mpi_wrapper/$FS_ARCH/cray_mpt5"
+    fi
+
+    if [ "$FLUENT_CRAY_MPI_ABI" = "1" ]; then
+        echo " WARNING: FLUENT_CRAY_MPI_ABI=1 is no longer required."
+    fi
+
+#
+# Check to see if Rhine-Redwood is running
+#
+    CRAYOSREL_FILE=/etc/opt/cray/release/cle-release
+    if [ -e ${CRAYOSREL_FILE} ]; then
+      CRAYOSREL=`grep RELEASE ${CRAYOSREL_FILE} | cut -d= -f2 | cut -d. -f1`
+      if [ "${CRAYOSREL}" -ge "6" ]; then
+        echo " WARNING: You appear to be running on Cray O/S Rhine/Redwood"
+#        echo " WARNING: FLUENT_CRAY_MPI_ABI=1 has been set"
+        echo " WARNING: If this is not the case, set enviro variable:"
+        echo " WARNING: 'NO_RHINE_REDWOOD=1'"
+#        if [ ! "${NO_RHINE_REDWOOD}" = "1" ]; then
+#          export FLUENT_CRAY_MPI_ABI=1
+#        fi
+      else
+        echo " WARNING: Cray Rhine/Redwood O/S partially detected but wrong "
+        echo " WARNING: O/S number."
+        echo " WARNING: Please set enviro variable FLUENT_CRAY_MPI_ABI=1"
+        echo " WARNING: if Fluent run is unsuccessful."
+      fi
+    fi
+
+
+    if [ -n "$FLUENT_ALPS_HOST_ON_COMPUTE" ]; then
+#      echo "ALPS_APP_PE=" ${ALPS_APP_PE}
+      if [ "${ALPS_APP_PE}" = "0" ]; then  
+        touch ${my_env_dat}
+        PRELIST=
+#        if [ "$FLUENT_CRAY_MPI_ABI" = "1" ]; then
+#           for mycraylibs in "$MPICH_DIR/lib" "/opt/cray/pe/lib64" "/opt/cray/lib64"
+#           do
+#             if [ -e "${mycraylibs}/libmpich_intel.so.3" ]; then
+#                sys_prepend_ld_library_path "$FS_MPTROOT/mpi_wrapper/$FS_ARCH/intel"
+#                if [ ! -e "libmpi.so.4" ]; then
+#                  ln -s ${mycraylibs}/libmpich_intel.so.3 libmpi.so.4
+#                  ln -s ${mycraylibs}/libmpich_intel.so.3 libmpi.so.12
+#                  ln -s libmpi.so.4 libmpi_mt.so.4
+#                  ln -s ${mycraylibs}/libmpichcxx_intel.so.3 libgc4.so.4
+#                  ln -s ${mycraylibs}/libmpichf90_intel.so.3 libigf.so.4
+#                fi
+#                sys_prepend_ld_library_path "."
+#                export MPICH_VERSION_DISPLAY=1
+#             fi
+#           done
+#        fi
+
+        if [ -n "$FLUENT_PROD_DIR" ]; then
+           echo "export FLUENT_PROD_DIR=$FLUENT_PROD_DIR " >> ${my_env_dat}
+        fi
+        if [ -n "$PYTHONHOME" ]; then
+          echo "export PYTHONHOME=$PYTHONHOME               " >> ${my_env_dat}
+        fi
+        if [ -n "$AFD_ROOT" ]; then
+           echo "export AFD_ROOT=$AFD_ROOT               " >> ${my_env_dat}
+           if [ "$FS_ARCH" == "lnamd64" ]; then
+             AFD_ARCH="linx64"
+           fi
+           if [ -n "$AFD_ARCH" ]; then
+             echo "export AFD_ARCH=$AFD_ARCH             " >> ${my_env_dat}
+           fi
+        fi
+        echo "export PATH=`echo $PATH`                   " >> ${my_env_dat}
+        echo "export LD_LIBRARY_PATH=$LD_LIBRARY_PATH    " >> ${my_env_dat}
+#
+#        if [ "${FLUENT_CRAY_MPI_ABI}" = "1" -a "${FLUENT_CRAY_DMAPP}" = "1" ]; then
+        if [ "${FLUENT_CRAY_DMAPP}" = "1" ]; then
+          PRELIST=libdmapp.so
+          echo " export MPICH_SHARED_MEM_COLL_OPT=1          " >> ${my_env_dat}
+          echo " export MPICH_USE_DMAPP_COLL=1               " >> ${my_env_dat}
+          echo " export MPICH_DMAPP_HW_CE=1                  " >> ${my_env_dat}
+        fi
+
+        if [ -n "${PRELIST}" ]; then
+          echo "export LD_PRELOAD=\" ${PRELIST}\"            " >> ${my_env_dat}
+        fi
+
+        cp ${my_env_dat} env.save
+        echo " $FS_CMD "  > ${my_exe_dat}
+        echo " Starting MPI command:" `cat ${my_exe_dat}`
+        echo "11111"      > ${my_tst_dat}
+
+#        $FS_CMD  < /dev/null
+        retval=$?
+        return $retval
+      fi
+    fi
+# End of FLUENT_ALPS_HOST_ON_COMPUTE
+
+#    if [ "$FLUENT_CRAY_MPI_ABI" = "1" ]; then
+#       for mycraylibs in "$MPICH_DIR/lib" "/opt/cray/pe/lib64" "/opt/cray/lib64"
+#       do
+#         if [ -e "${mycraylibs}/libmpich_intel.so.3" ]; then
+#            sys_prepend_ld_library_path "$FS_MPTROOT/mpi_wrapper/$FS_ARCH/intel"
+#            if [ ! -e "libmpi.so.4" ]; then
+#              ln -s ${mycraylibs}/libmpich_intel.so.3 libmpi.so.4
+#              ln -s ${mycraylibs}/libmpich_intel.so.3 libmpi.so.12
+#              ln -s libmpi.so.4 libmpi_mt.so.4
+#              ln -s ${mycraylibs}/libmpichcxx_intel.so.3 libgc4.so.4
+#              ln -s ${mycraylibs}/libmpichf90_intel.so.3 libigf.so.4
+#            fi
+#            sys_prepend_ld_library_path "."
+#            export MPICH_VERSION_DISPLAY=1
+#         fi
+#       done
+#    fi
+
+    my_cmdline="aprun "
+#    if [ ! `builtin type -p aprun` ]; then
+    if [ "$FLUENT_ENABLE_SLURM_SUPPORT" = "1" ]; then
+      my_cmdline="srun "
+    fi
+
+    # aprun will take care of the coupling with scheduler lsf/pbs
+
+    my_lhost=`hostname`
+
+    if [ -z "$FL_ENABLE_CRAY_AFFINITY" ]; then
+      my_cmdline="$my_cmdline -cc none"
+    fi
+
+    my_cmdline="$my_cmdline -n $FS_NPROC $FS_MPIRUN_FLAGS $FS_CMD"
+    
+    # start job
+
+    echo Starting $my_cmdline
+    $my_cmdline < /dev/null
+
+    # cleanup temp file
+
+    if [ "X$my_appfile" != "X" ]; then
+        test -f $my_appfile && rm -f $my_appfile
+    fi
+}
+#------------------------------------------------------------------------------
+mpich_run ()
+{
+    my_mpi_dir=$FS_MPTROOT/mpi/$FS_ARCH/$FS_MPI
+    my_tmp_script="$FS_TMPDIR/fluent-run-$USER-$$-`hostname`"
+    my_p4pg_file="$FS_TMPDIR/p4pg-$USER-$$-`hostname`"
+    my_node0=
+
+    case $FS_RSHELL in
+        ssh)   FS_RCOPY=scp;;
+        *)     FS_RCOPY=rcp;;
+    esac
+
+    # pick up MPI shared libraries
+    sys_prepend_ld_library_path "$my_mpi_dir/lib"
+
+    if [ -z "$MPIR_HOME" ]; then
+        MPIR_HOME=$my_mpi_dir
+        export MPIR_HOME
+    fi
+    P4_RSHCOMMAND=$FS_RSHELL
+    export P4_RSHCOMMAND 
+    # On Linux, set P4_GLOBMEMSIZE to its max kernal limit
+    if [ -z "$P4_GLOBMEMSIZE" ]; then
+        case $FS_ARCH in
+            lnx86* | lnia64 | lnamd64)
+                if [ -f "/proc/sys/kernel/shmmax" ] ; then
+                    P4_GLOBMEMSIZE=`cat /proc/sys/kernel/shmmax`
+                fi;;
+            ultra*)
+                if [ -x "/usr/sbin/sysdef" ] ; then
+                    P4_GLOBMEMSIZE=`/usr/sbin/sysdef -i | grep SHMMAX | \
+                       awk '{print $1}'`
+                fi;;
+        esac
+        if [ -z "$P4_GLOBMEMSIZE" ]; then
+            case $FS_ARCH in
+                ultra* | aix*)
+                    P4_GLOBMEMSIZE=67108864;;
+                *)
+                    P4_GLOBMEMSIZE=33554432;;
+            esac
+        fi
+    fi
+    export P4_GLOBMEMSIZE
+
+    # define hostlist
+
+    my_hostlist=`parallel_get_hostlist -n $FS_NPROC -cnf=$FS_CNF -space`
+
+    # define p4pg file (use tcp-loopback for on-host communication)
+
+    my_cmd=$my_tmp_script
+    my_node0=
+    for hostandcount in $my_hostlist
+    do
+        host=`echo $hostandcount | awk -F: '{print $1}'`
+        count=`echo $hostandcount | awk -F: '{print $2}'`
+        if [ -z "$my_node0" ]; then
+            my_node0=$host
+            echo "$host 0 $my_cmd" > $my_p4pg_file
+
+            tmp1=`echo $host | awk -F. '{print $1}'`
+            tmp2=`hostname | awk -F. '{print $1}'`
+            if [ "$tmp1" != "$tmp2" ]; then
+                my_nolocal_flag=-nolocal
+            fi
+        else
+            echo "$host 1 $my_cmd" >> $my_p4pg_file
+        fi
+    done
+
+    if [ -n "$my_nolocal_flag" ]; then
+        parallel_remote_copy $FS_RCOPY $my_p4pg_file $my_node0
+    fi
+
+    # create temporary run-script to be used by mpirun
+    # (the script is self deleting)
+
+    echo "#!/bin/sh" > $my_tmp_script
+    echo "MPIR_HOME=$MPIR_HOME; export MPIR_HOME" >> $my_tmp_script
+    echo "P4_RSHCOMMAND=$P4_RSHCOMMAND; export P4_RSHCOMMAND" >> $my_tmp_script
+    echo "P4_GLOBMEMSIZE=$P4_GLOBMEMSIZE; export P4_GLOBMEMSIZE" \
+        >> $my_tmp_script
+    echo "LD_PRELOAD=$LD_PRELOAD; export LD_PRELOAD"  >> $my_tmp_script
+    echo "LD_LIBRARY_PATH=$LD_LIBRARY_PATH; export LD_LIBRARY_PATH" \
+        >> $my_tmp_script
+    if [ -n "$PYTHONHOME" ]; then
+      echo "PYTHONHOME=$PYTHONHOME; export PYTHONHOME" >> $my_tmp_script
+    fi
+    case $FS_ARCH in
+        aix*)  my_ldpath="LIBPATH=$LIBPATH; export LIBPATH";;
+        hpux*) my_ldpath="SHLIB_PATH=$SHLIB_PATH; export SHLIB_PATH";;
+        *)     my_ldpath=
+    esac
+    if [ -n "$my_ldpath" ]; then
+        echo "$my_ldpath" >> $my_tmp_script
+    fi
+    echo "$FS_CMD \$*" >> $my_tmp_script
+    echo "test -f $my_tmp_script && rm -f $my_tmp_script" >> $my_tmp_script
+    chmod +x $my_tmp_script
+
+    # copy temporary script to remote nodes
+
+    my_hostlist=`parallel_get_hostlist -n $FS_NPROC -cnf=$FS_CNF -keepcolon`
+    parallel_remote_copy $FS_RCOPY "$my_tmp_script" "$my_hostlist"
+
+    # define command to start temporary script with mpirun
+        
+    my_cmdline="$my_mpi_dir/bin/mpirun $FS_MPIRUN_FLAGS $my_nolocal_flag \
+        -p4pg $my_p4pg_file -machine ch_p4 -machinefile $my_p4pg_file"
+    my_cmdline="$my_cmdline $my_tmp_script"
+
+    #
+    # start job
+    #
+
+    echo Starting $my_cmdline
+    $my_cmdline
+
+    # cleanup temporary files
+    # (note: tmp runscript is self-deleting)
+
+    test -f $my_p4pg_file && /bin/rm $my_p4pg_file
+    if [ -n "$my_nolocal_flag" ]; then
+        $FS_RSHELL -n $my_node0 rm -f $my_p4pg_file
+    fi
+}
+
+parallel_remote_copy ()
+{
+    rcp_cmd=$1
+    local_file=$2
+    remote_host_list=$3
+    host_done=""
+    if [ $# -gt 3 ]; then
+        remote_file=$4
+    else
+        remote_file=$local_file
+    fi
+    if [ -f "$remote_host_list" ]; then
+        remote_host_list=`cat $remote_host_list`
+    fi
+    remote_host_list=`echo $remote_host_list | tr ',' ' '`
+    for cnfinfo in $remote_host_list ; do
+        hname=`echo $cnfinfo | awk -F: '{print $1}'`
+        hdone=0
+        for h in $host_done; do
+            if [ "$h" = "$hname" ]; then
+                hdone=1
+                break;
+            fi
+        done
+        if [ `hostname` != "$hname" -a "$hdone" = "0" ]; then
+            $rcp_cmd $local_file $hname:$remote_file
+            if [ $? -ne 0 ]; then
+                printf "%s%s\n" "Error: $rcp_cmd failed :" \
+                    " Could not copy $local_file on $hname"
+                exit 1
+            fi
+            host_done="$host_done $hname"
+        fi
+    done
+}
+#------------------------------------------------------------------------------
+mpichmx_run ()
+{
+    my_mpi_dir=$FS_MPTROOT/mpi/$FS_ARCH/$FS_MPI
+
+    # pick up MPI and MX shared libraries
+
+    LD_LIBRARY_PATH="$LD_LIBRARY_PATH:$my_mpi_dir/lib"
+    LD_LIBRARY_PATH="$LD_LIBRARY_PATH:/opt/mx/lib"
+    export LD_LIBRARY_PATH
+
+    if [ -z "$MPIR_HOME" ]; then
+        MPIR_HOME=$my_mpi_dir
+        export MPIR_HOME
+    fi
+
+    MX_RSHCOMMAND=$FS_RSHELL
+    export MX_RSHCOMMAND
+
+    # create hostfile
+
+    my_hostlist=`parallel_get_hostlist -n $FS_NPROC -cnf=$FS_CNF -keepcolon`
+    my_tmpfile="$FS_TMPDIR/fluent_tmp_cnf-$USER-$$"
+    parallel_create_hostfile -list=$my_hostlist -f $my_tmpfile
+
+    # define command line 
+    # (note: LD_LIBRARY_PATH is transferred to remote machines by mpirun,
+    # but other env vars are not unless --mx-copy-env option is used.
+    # MPIR_HOME and MX_RSHCOMMAND are not needed on remote machines.)
+
+    my_cmdline="$my_mpi_dir/bin/mpirun $FS_MPIRUN_FLAGS \
+        -np $FS_NPROC -machinefile $my_tmpfile $FS_CMD"
+
+    #
+    # start job
+    #
+
+    echo Starting $my_cmdline
+    $my_cmdline
+
+    # cleanup temp file
+
+    if [ "X$my_tmpfile" != "X" ]; then
+        test -f $my_tmpfile && rm -f $my_tmpfile
+    fi
+}
+#------------------------------------------------------------------------------
+mvapich_run ()
+{
+    my_mpi_dir=$FS_MPTROOT/mpi/$FS_ARCH/$FS_MPI
+
+    if [ "$FS_ARCH" != "lnamd64" ]; then
+        echo "Error: mvapich only valid for lnamd64"
+        exit 1
+    fi
+
+    isMellanoxMpirun=
+
+    # if the system/vendor MVAPICH library is selected, perform setup
+    # specific to the system/vendor installation.  This is only performed
+    # if the user specifically requested the system/vendor MVAPICH (vs. the
+    # MVAPICH libraries shipped with the application).
+
+    if [ "$PARA_MPI_VARIANT" != "" ]; then
+        echo " "
+        echo "***"
+        echo "*** Using native $FS_IC_VARIANT drivers and the MVAPICH stack"
+        echo "*** for Infiniband execution!"
+        echo "***"
+
+        case $FS_IC_VARIANT in
+            mellanox)
+                ibgd_dir=/usr/ibgd/driver/infinihost
+                if [ -z $IBA_VAPILIB ]; then
+                    if [ -r $ibgd_dir/lib64 ]; then
+                        IBA_VAPILIB=$ibgd_dir/lib64
+                    elif [ -r $ibgd_dir/lib ]; then
+                        IBA_VAPILIB=$ibgd_dir/lib
+                    fi
+                fi
+                if [ -z $IBA_MPILIB ]; then
+                    IBA_MPILIB=`find /usr/ibgd/mpi -name libmpich.so \
+                        | sed 's/libmpich.so//'`
+                fi
+                if [ -z $IBA_MPIRUN ]; then
+                    IBA_MPIRUN=`find /usr/ibgd/mpi -name mpirun_rsh`
+                    if [ "$FS_RSHELL" = "rsh" ]; then
+                        IBA_MPIRUN="$IBA_MPIRUN -rsh"
+                    fi
+                fi
+                isMellanoxMpirun=1
+                ;;
+            infinicon)
+                if [ -z $IBA_VAPILIB ]; then
+                    IBA_VAPILIB=/lib
+                fi
+                if [ -z $IBA_MPILIB ]; then
+                    IBA_MPILIB=/usr/local/lib/shared
+                fi
+                if [ -z $IBA_MPIRUN ]; then
+                    if [ "$FS_RSHELL" = "ssh" ]; then
+                        IBA_MPIRUN="/usr/local/bin/mpirun_rsh"
+                    else
+                        IBA_MPIRUN="/usr/local/bin/mpirun_rsh -rsh"
+                    fi
+                fi
+                ;;
+            silverstorm)
+                if [ -z $IBA_VAPILIB ]; then
+                    IBA_VAPILIB=/lib64
+                fi
+                if [ -z $IBA_MPILIB ]; then
+                    IBA_MPILIB=/usr/local/lib64/shared
+                fi
+                if [ -z $IBA_MPIRUN ]; then
+                    if [ "$FS_RSHELL" = "ssh" ]; then
+                        IBA_MPIRUN="/usr/local/bin/mpirun_rsh"
+                    else
+                        IBA_MPIRUN="/usr/local/bin/mpirun_rsh -rsh"
+                    fi
+                fi
+                ;;
+            topspin)
+                if [ -z $IBA_VAPILIB ]; then
+                    IBA_VAPILIB=/usr/topspin/lib64
+                fi
+                if [ -z $IBA_MPILIB ]; then
+                    IBA_MPILIB=/usr/topspin/mpi/mpich/lib64
+                fi
+                if [ -z $IBA_MPIRUN ]; then
+                    if [ "$FS_RSHELL" = "ssh" ]; then
+                        IBA_MPIRUN=/usr/topspin/mpi/mpich/bin/mpirun_ssh
+                    else
+                        IBA_MPIRUN=/usr/topspin/mpi/mpich/bin/mpirun_rsh
+                    fi
+                fi
+                ;;
+            voltaire)
+                if [ -z $IBA_VAPILIB ]; then
+                    IBA_VAPILIB="/usr/mellanox/lib:/usr/voltaire/lib"
+                fi
+                if [ -z $IBA_MPILIB ]; then
+                    IBA_MPILIB=/usr/voltaire/mpi/lib/shared
+                fi
+                if [ -z $IBA_MPIRUN ]; then
+                    if [ "$FS_RSHELL" = "ssh" ]; then
+                        IBA_MPIRUN=/usr/voltaire/mpi/bin/mpirun_ssh
+                    else
+                        IBA_MPIRUN=/usr/voltaire/mpi/bin/mpirun_rsh
+                    fi
+                fi
+                # preload libg2c to resolve f__xargc
+                LD_PRELOAD="$LD_PRELOAD:/usr/lib64/libg2c.so.0"
+                ;;
+            default)
+                ;;
+            *)
+                echo "Error: invalid interconnect vendor $FS_IC_VARIANT"
+                exit 1;;
+        esac
+
+        # for when installation does not have libmpich.so.1.0 but
+        # only libmpich.so
+        if [ ! -f $IBA_MPILIB/libmpich.so.1.0 ]; then
+            if [ -f $IBA_MPILIB/libmpich.so ]; then
+                if [ -f $HOME/libmpich.so.1.0 ]; then
+                    /bin/rm -f $HOME/libmpich.so.1.0
+                    /bin/rm -f $HOME/libmpich.so.1.0.info
+                fi
+                /bin/ln -s $IBA_MPILIB/libmpich.so $HOME/libmpich.so.1.0
+                echo "FLUENT/MVAPICH helper link" >> $HOME/libmpich.so.1.0.info
+                IBA_MPILIB="$IBA_MPILIB:$HOME"
+            fi
+        fi
+    fi
+
+    # perform generic mvapich setup.  If a system/vendor MVAPICH library is
+    # not used, the one distributed with the application is applied.
+
+    if [ -z "$IBA_VAPILIB" ]; then
+        IBA_VAPILIB=/usr/ibgd/driver/infinihost/lib
+    else
+        echo "*** IBA_VAPILIB = $IBA_VAPILIB"
+    fi
+    if [ -z "$IBA_MPILIB" ]; then
+        IBA_MPILIB="$my_mpi_dir/lib"
+    else
+        echo "*** IBA_MPILIB  = $IBA_MPILIB"
+        if [ ! -f $IBA_MPILIB/libmpich.so.1.0 ]; then                 
+            # this for Topspin (see above)
+            if [ ! -f $HOME/libmpich.so.1.0 ]; then
+                echo " "
+                echo "*** Cannot find MPI library $IBA_MPILIB/libmpich.so.1.0"
+                echo "*** Check with your sys admin that shared library"
+                echo "*** support is enabled in your MVAPICH installation!"
+                echo "*** For atypical installations set IBA_MPILIB and retry."
+                exit 1
+            fi
+        fi
+    fi
+    LD_LIBRARY_PATH="$IBA_MPILIB:$IBA_VAPILIB:$LD_LIBRARY_PATH"
+    export LD_LIBRARY_PATH
+
+    if [ -z "$MPIR_HOME" ]; then
+        MPIR_HOME=$my_mpi_dir
+        export MPIR_HOME
+    fi
+
+    if [ -z "$IBA_MPIRUN" ]; then
+        if [ "$FS_RSHELL" = "ssh" ]; then
+            IBA_MPIRUN="$my_mpi_dir/bin/mpirun_rsh"
+        else
+            IBA_MPIRUN="$my_mpi_dir/bin/mpirun_rsh -rsh"
+        fi
+    else
+        echo "*** IBA_MPIRUN  = $IBA_MPIRUN"
+    fi
+
+    # define command
+
+    my_cmdline="$IBA_MPIRUN $FS_MPIRUN_FLAGS -np $FS_NPROC"
+
+    if [ -n "$FS_CNF" ]; then
+        # no colon permitted in hostfile
+        my_hostlist=`parallel_get_hostlist -n $FS_NPROC -cnf=$FS_CNF`
+        my_tmpfile="$FS_TMPDIR/fluent_tmp_cnf-$USER-$$"
+        parallel_create_hostfile -list=$my_hostlist -f $my_tmpfile
+
+        my_cmdline="$my_cmdline -hostfile $my_tmpfile"
+    fi
+
+    my_cmdline="$my_cmdline env LD_LIBRARY_PATH=$LD_LIBRARY_PATH"
+    if [ -n "$LD_PRELOAD" ]; then
+        my_cmdline="$my_cmdline LD_PRELOAD=$LD_PRELOAD"
+    fi
+    if [ -n "$PYTHONHOME" ]; then
+      my_cmdline="$my_cmdline env PYTHONHOME=$PYTHONHOME"
+    fi
+
+    my_cmdline="$my_cmdline $FS_CMD"
+
+    # the mpirun distributed with mellanox 1.8.2 has problems if
+    # LD_LIBRARY_PATH is set in the env from where mpirun is started. 
+    # Thus we unset it here to avoid the problem.  The node executables get the
+    # path from using "env LD_LIBR..." when starting the node executables
+    # with mpirun so it no longer needs to be set after this point.
+
+    if [ -n "$isMellanoxMpirun" ]; then
+        unset LD_LIBRARY_PATH
+    fi
+
+    #
+    # start job
+    #
+
+    echo Starting $my_cmdline
+    $my_cmdline
+
+    #
+    # cleanup
+    #
+
+    if [ -f $HOME/libmpich.so.1.0.info ]; then
+        /bin/rm -f $HOME/libmpich.so.1.0
+        /bin/rm -f $HOME/libmpich.so.1.0.info
+    fi
+
+    if [ "X$my_tmpfile" != "X" ]; then
+        test -f $my_tmpfile && rm -f $my_tmpfile
+    fi
+}
+#------------------------------------------------------------------------------
+vendor_run ()
+{
+    #
+    # define vendor-specific command and environment variables
+    #
+
+    my_tmpfile=
+    my_cmdline=
+
+    case $FS_ARCH in
+        hpux*) \
+            # use ibmmpi function (defined for both hpux and linux)
+            ibmmpi_run
+            return
+            ;;
+        aix* | power*) \
+            MP_SHARED_MEMORY=yes; export MP_SHARED_MEMORY
+            MP_WAIT_MODE=poll; export MP_WAIT_MODE
+            MEMORY_AFFINITY=MCM; export MEMORY_AFFINITY
+            # MP_SINGLE_THREAD=yes; export MP_SINGLE_THREAD
+            LIBPATH="/usr/lpp/ppe.poe/lib:$LIBPATH"; export LIBPATH
+            my_cmdline="/bin/poe"
+
+            # poe needs separate line for each process (no colon)
+            my_hostlist=`parallel_get_hostlist -n $FS_NPROC -cnf=$FS_CNF`
+            my_tmpfile="$FS_TMPDIR/fluent-cnf-$USER-$$"
+            parallel_create_hostfile -list=$my_hostlist -f $my_tmpfile
+
+            MPI_OPTIONS_POST="-procs $FS_NPROC -hostfile $my_tmpfile"
+            my_cmdline="$my_cmdline $FS_CMD $MPI_OPTIONS_POST"
+            ;;
+        irix6*) \
+            # note: SGI passes LD_LIBRARY_PATH (and env vars in general)
+            # to node executables so nothing special is required for
+            # LD_LIBRARY_PATH.  (However, if LD_LIBRARY_PATH gets too long,
+            # mpirun will have problems.)
+
+            MPI_DSM_OFF=1
+            export MPI_DSM_OFF
+
+            my_cmdline="/usr/bin/mpirun $FS_MPIRUN_FLAGS"
+
+            if [ -n "$FS_CNF" ]; then
+                my_hostlist=`parallel_get_hostlist -n $FS_NPROC -cnf=$FS_CNF`
+                MPI_NP=1; export MPI_NP
+                my_cmdline="$my_cmdline $my_hostlist -np 1"
+            else
+                MPI_NP=$FS_NPROC; export MPI_NP
+                my_cmdline="$my_cmdline -np $FS_NPROC"
+            fi
+
+            if [ `/bin/uname -r` = 6.4 -o `/bin/uname -r` = 6.5 ]; then
+                if [ -n "$FS_DPLACE_DIR" ]; then
+                    if [ `/bin/uname -m` = IP35 ]; then
+                        my_cmdline="$my_cmdline dplace \
+                            -propagate -place $FS_DPLACE_DIR/place4.vmpi"
+                    elif [ `/bin/uname -m` = IP27 ]; then
+                        my_cmdline="$my_cmdline dplace \
+                            -propagate -place $FS_DPLACE_DIR/place2.vmpi"
+                    fi
+                fi
+            fi
+
+            my_len=`echo $LD_LIBRARY_PATH | sed 's/LD_LIBRARY_PATH=//' | wc -m`
+            if [ $my_len -gt 1024 ]; then
+                printf "%s %s\n" "Error: LD_LIBRARY_PATH too long;" \
+                    "please install fluent higher in directory hierarchy"
+                exit 1
+            fi
+
+            my_cmdline="$my_cmdline $FS_CMD"
+            ;;
+        ultra*) \
+            if [ "$FS_ARCH" = "ultra_64" -o "$FLUENT_ARCH" = "ultra_64" ]; then
+            LD_LIBRARY_PATH="$LD_LIBRARY_PATH:/opt/SUNWhpc/HPC7.1/lib/sparcv9"
+            export LD_LIBRARY_PATH
+            else
+            LD_LIBRARY_PATH="$LD_LIBRARY_PATH:/opt/SUNWhpc/HPC7.1/lib"
+            export LD_LIBRARY_PATH
+            fi
+
+    my_protocol=tcp
+    case $FS_IC in
+        eth | ethernet | default)
+            my_protocol=tcp
+            ;;
+        ib | infiniband)
+                my_protocol=udapl
+            ;;
+    esac
+
+    case $my_protocol in
+        tcp)
+            my_ic_flag="--mca btl self,sm,tcp"
+            ;;
+        udapl)
+            my_ic_flag="--mca btl self,sm,udapl"
+            ;;
+        *)
+            echo "Error: protocol $my_protocol not implemented for Open MPI"
+            exit 1
+            ;;
+    esac
+
+    # set arch-specific flags
+
+       my_arch_flags="--x LD_LIBRARY_PATH"
+
+    # build parallel executable command
+    #  - mca_component_show_load_errors disables load errors; this is used
+    #    temporarily to avoid mx, mvapi errors on systems that do not have
+    #    this hardware; issue is being addressed by OpenMPI team.
+    #  - use "-d" to debug startup
+    #  - export OMPI_MCA_pls_rsh_agent for rsh/ssh; using the command-line
+    #    argument "--mca pls_rsh_agent $FS_RSHELL" does not work with 1.2
+    #  - export OMPI_MCA_mca_component_show_load_errors to avoid load errors
+    #    for unused components; to avoid triggering testing checks on "error"
+    #    in output, "--mca mca_component_show_load_errors 0" is not used.
+
+    OMPI_MCA_pls_rsh_agent=$FS_RSHELL; export OMPI_MCA_pls_rsh_agent
+    OMPI_MCA_mca_component_show_load_errors=0
+    export OMPI_MCA_mca_component_show_load_errors
+
+    my_cmdline="/opt/SUNWhpc/HPC7.1/bin/mpirun $FS_MPIRUN_FLAGS"
+    my_per_host_flags="$my_ic_flag \
+        --prefix /opt/SUNWhpc/HPC7.1 \
+        $my_arch_flags"
+
+    # fixup for file descriptor problem; stdin is closed by fluent but
+    # mpirun has problems with have stdin close; thus, stdin is opened
+    # from /dev/null.
+
+    fixfiledes() {
+        "$@" < /dev/null
+    }
+    my_cmdline="fixfiledes $my_cmdline"
+
+    # consider launch on local node
+
+    if [ -z "$FS_CNF" ]; then
+        my_lhost=`hostname`
+        my_cmdline="$my_cmdline $my_per_host_flags \
+            --np $FS_NPROC --host $my_lhost $FS_CMD"
+
+    # consider launch on remote nodes
+
+    else
+        my_hostlist=`parallel_get_hostlist -n $FS_NPROC -cnf=$FS_CNF \
+            -keepcolon -space`
+
+        my_cmd=
+        for hostandcount in $my_hostlist
+        do
+            host=`echo $hostandcount | awk -F: '{print $1}'`
+            count=`echo $hostandcount | awk -F: '{print $2}'`
+
+            # augment command, optionally adding delimiter
+            if [ -n "$my_cmd" ]; then
+                my_cmd="$my_cmd :"
+            fi
+            my_cmd="$my_cmd $my_per_host_flags -np $count --host $host $FS_CMD"
+        done
+        my_cmdline="$my_cmdline $my_cmd"
+    fi
+
+    ;;
+    esac # End of $FS_ARCH case
+
+    #
+    # start job
+    #
+
+    echo Starting $my_cmdline
+    $my_cmdline
+
+    #
+    # cleanup
+    #
+
+    if [ "X$my_tmpfile" != "X" ]; then
+        test -f $my_tmpfile && rm -f $my_tmpfile
+    fi
+}
+#------------------------------------------------------------------------------
+# prepends to system-specific shared library path
+# (first argument is the directory to prepend)
+sys_prepend_ld_library_path ()
+{
+    shared_lib_dir=$1
+
+    LD_LIBRARY_PATH="$shared_lib_dir:$LD_LIBRARY_PATH"
+    export LD_LIBRARY_PATH
+
+    case $FLUENT_ARCH in
+        aix*) 
+            LIBPATH="$shared_lib_dir:$LIBPATH"; 
+            export LIBPATH 
+            ;; 
+        hpux*)
+            SHLIB_PATH="$shared_lib_dir:$SHLIB_PATH";
+            export SHLIB_PATH
+            ;;
+        irix*)
+            LD_LIBRARYN32_PATH="$shared_lib_dir:$LD_LIBRARYN32_PATH";
+            export LD_LIBRARYN32_PATH
+            ;;    
+        power*) 
+            LIBPATH="$shared_lib_dir:$LIBPATH"; 
+            export LIBPATH 
+            ;;         
+        esac
+}
+#------------------------------------------------------------------------------
+# appends to system-specific shared library path
+# (first argument is the directory to append)
+sys_append_ld_library_path ()
+{
+    shared_lib_dir=$1
+
+    LD_LIBRARY_PATH="$LD_LIBRARY_PATH:$shared_lib_dir"
+    export LD_LIBRARY_PATH
+
+    case $FLUENT_ARCH in
+        aix*) 
+            LIBPATH="$LIBPATH:$shared_lib_dir"; 
+            export LIBPATH 
+            ;; 
+        hpux*)
+            SHLIB_PATH="$SHLIB_PATH:$shared_lib_dir";
+            export SHLIB_PATH
+            ;;
+        irix*)
+            LD_LIBRARYN32_PATH="$LD_LIBRARYN32_PATH:$shared_lib_dir";
+            export LD_LIBRARYN32_PATH
+            ;;    
+        power*) 
+            LIBPATH="$LIBPATH:$shared_lib_dir"; 
+            export LIBPATH 
+            ;;         
+        esac
+}
+#------------------------------------------------------------------------------
+# starts mpd daemons if needed
+parallel_mpd_start() {
+
+    # process input args
+
+    mpd_rsh=rsh
+    mpd_hostfile=
+    mpd_verbose=
+    mpd_bindir=
+    mpd_pydir=
+
+    while [ $# -gt 0 ]; do
+        case $1 in
+            -r)         mpd_rsh=$2;shift;;
+            --rsh=*)    mpd_rsh=`echo $1 | sed 's/--rsh=//'`;;
+            --bindir=*) mpd_bindir=`echo $1 | sed 's/--bindir=//'`;;
+            --pydir=*)  mpd_pydir=`echo $1 | sed 's/--pydir=//'`;;
+            -f)         mpd_hostfile=$2;shift;;
+            *)          echo "parallel_mpd_start: invalid option $1" 1>&2;
+                        exit 1;;
+        esac
+        shift
+    done
+
+    MPD_BIN=$mpd_bindir
+
+    # redirect input from /dev/null so can be run in background
+    mpd_rsh="$mpd_rsh -n"
+
+    if [ "$mpd_rsh" = "ssh" ]; then
+        # disable X11 forwarding (-x)
+        # don't start in background (-f) because we want to ensure that
+        # daemons are started before leaving.
+        mpd_rsh="$mpd_rsh -x"
+    fi
+
+    # make sure ".mpd.conf" file is present
+
+    MPD_CONF_FILE=$HOME/.mpd.conf
+    if [ ! -f $MPD_CONF_FILE  ]; then
+        echo "secretword=fluent$USER" >> $MPD_CONF_FILE
+        chmod 600 $HOME/.mpd.conf
+    fi
+
+    # set path to pick up packaged python
+
+    if [ -n "$mpd_pydir" ]; then
+        PATH="$mpd_pydir:$PATH"
+        export PATH
+    fi
+
+    # initialize defaults and set loop invariants
+
+    mpd_lhost=`hostname`
+    mpd_lhost=`echo $mpd_lhost | awk -F. '{print $1}'`
+
+    # get hosts on which daemons are needed.
+    #  - mpd's are to be started on all hosts in hostfile.
+    #  - some hosts may not be used if number of processes is less than # of
+    #    CPUs in hostfile.
+    #  - if a host is included multiple times it is only counted once.
+    #  - the local node is always counted, even if not in hostfile
+
+    mpd_host_list=$mpd_lhost   # always include the local host
+    if [ -n "$mpd_hostfile" ]; then
+        if [ -f "$mpd_hostfile" ]; then
+            host_info=`cat $mpd_hostfile | grep -v '^#'`
+        else
+            host_info=`echo $mpd_hostfile | tr ',' ' '` 
+        fi
+
+        for hostandcount in $host_info
+        do
+            #ignore #ed lines
+            (echo $hostandcount | grep '^#') >/dev/null
+            if [ $? -eq 0 ]; then
+                continue
+            fi
+            name=`echo $hostandcount | awk -F: '{print $1}'`
+            # add if doesn't exist in list
+            hostmatch=`echo $mpd_host_list | awk '{ for(i=1;i<=NF;i++) print $i}' | grep \^$name\$`
+            if [ -z "$hostmatch" ]; then
+                mpd_host_list="$mpd_host_list $name"
+            fi
+        done
+    fi
+
+    # check if console daemon is currently running
+
+    mpd_hosts_existing=`$MPD_BIN/mpdtrace 2>/dev/null`
+    isConsoleNeeded=$?
+
+    # if console is present, get console port
+
+    mpd_console_port=
+    if [ $isConsoleNeeded -eq 0 ]; then
+        echo "Console daemon already running"
+        # extract port from <hostname>_<port> syntax
+        line=`$MPD_BIN/mpdtrace -l | grep $mpd_lhost`
+        # delete any extraneous output
+        line=`echo $line | awk '{ $2 = ""; print }'`
+        mpd_console_port=`echo $line | awk -F_ '{print $1}'`
+
+    # otherwise, start local console daemon
+
+    else
+        mpd_cmd="$MPD_BIN/mpd -e -d"
+        python_name=`python -V 2>&1`
+        echo "Starting new console mpd (${python_name})"
+
+        mpd_console_port=`$mpd_cmd 2>/dev/null`
+
+        # test mpd startup; if failure retry with wait
+
+        $MPD_BIN/mpdtrace > /dev/null 2>&1
+        if [ $? != 0 ]; then
+            echo "retrying..."
+            mpd_console_port=`$mpd_cmd 2>/dev/null`
+            sleep 2
+            $MPD_BIN/mpdtrace > /dev/null 2>&1
+            if [ $? != 0 ]; then
+                echo $mpd_console_port  # contains error message on failure
+                echo "Error: problem starting local daemon"
+                exit 1
+            fi
+        fi
+
+        mpd_hosts_existing=$mpd_lhost
+    fi
+
+    # start remote daemons if they do not exist in current ring
+    # (set path to pickup packaged python)
+
+    mpd_rcmd="env PATH=$PATH $MPD_BIN/mpd --noconsole -d --host=$mpd_lhost --port=$mpd_console_port"
+    err=0
+    mpd_nstarted=0
+    for rhost in $mpd_host_list
+    do
+        # strip domain name
+        rhost_base=`echo $rhost | awk -F. '{print $1}'`
+        if [ "$rhost_base" = "$mpd_lhost" ]; then
+            continue  # skip local; daemon already started here
+        fi
+
+        # start daemon if host isn't present in previously-existing ring
+
+        hostmatch=`echo $mpd_hosts_existing | awk '{ for(i=1;i<=NF;i++) print $i}' | grep \^$rhost_base\$`
+
+        if [ -z "$hostmatch" ]; then
+            if [ -n "$mpd_verbose" ]; then
+                printf "   starting $mpd_rsh $rhost $mpd_rcmd..."
+            fi
+
+            #echo "$mpd_rsh $rhost $mpd_rcmd"
+            $mpd_rsh $rhost $mpd_rcmd
+
+            if [ $? = 0 ]; then 
+                if [ -n "$mpd_verbose" ]; then
+                    printf "success\n";
+                fi
+                mpd_nstarted=`expr $mpd_nstarted + 1`
+            else
+                if [ -n "$mpd_verbose" ]; then
+                    printf "failure\n";
+                fi
+                err=1
+                echo "Error: problem starting remote daemon: $mpd_rsh $rhost $mpd_rcmd"
+            fi
+        else
+            if [ -n "$mpd_verbose" ]; then
+                echo "   daemon already running on $rhost"
+            fi
+        fi
+    done
+
+    #echo "Testing MPI daemons..."
+    #echo "$MPD_BIN/mpdtrace"
+    #$MPD_BIN/mpdtrace
+
+    echo "Successfully started MPI daemons"
+
+    if [ $err != 0 ]; then
+        exit 1
+    fi
+}
+#------------------------------------------------------------------------------
+# shuts down daemons if no other jobs are attached
+parallel_mpd_stop() {
+
+    $MPD_BIN/mpdlistjobs | grep "jobid" > /dev/null 2>&1
+    isEmpty=$?
+
+    if [ $isEmpty -ne 0 ]; then
+        echo "No jobs running; shutting down daemons"
+        $MPD_BIN/mpdallexit > /dev/null 2>&1
+    else
+        echo "Other jobs running; leaving daemons up"
+    fi
+}
+#------------------------------------------------------------------------------
+# this function creates and returns a list of hosts for the virtual machine in
+# the form "host1:n1,host2:n2 ...." based on (1) the number of processes, and
+# (2) the parallel configuration file.
+# 
+# note(s):
+#  - list defined in configuration file will be truncated if number of
+#    specified processes is less the number of total CPUs defined in cnf file.
+#  - wrap around will be used if number of processes requested is greater than
+#    the number of CPUs defined in the cnf file. 
+#  - inputs arguments:
+#    -n <nproc>        defines number of processes
+#    -cnf=<cnf>        defines configuration; hostfile or comma-delimited list
+#    -keepcolon        indicates that colon output format should be used
+#    -space            indicates that space delimiting should be used instead
+#                      of comma delimiting.
+#  - output:
+#    return arg: 0 if no error; non-zero otherwise
+#    to stdout: list of hosts in virtual machine:
+#      (default):          "host1,host2,..."
+#      -keepcolon:         "host1:n1,host2:n2,..."
+#      -space:             "host1 host2 ..."
+#      -keepcolon -space:  "host1:n1 host2:n2 ..."
+#
+parallel_get_hostlist () {
+
+    # process input
+
+    pgh_cnf=
+    pgh_nprocs=0
+    pgh_use_colon=0
+    pgh_use_space=0
+    while [ $# -gt 0 ]; do
+        case $1 in
+            -n)         pgh_nprocs=$2;shift;;
+            -cnf=*)     pgh_cnf=`echo $1 | sed 's/-cnf=//'`;;
+            -keepcolon) pgh_use_colon=1;;
+            -space)     pgh_use_space=1;;
+        esac
+        shift
+    done
+
+    if [ $FS_STREAMTEST -eq 1 -o $FS_CFLUSH -eq 1 ]; then
+       pgh_use_colon=0
+    fi
+
+    # create list, optionally using wrap around
+
+    if [ -z "$pgh_cnf" ]; then
+        pgh_cnf=`hostname`  # SMP with no cnf specified
+    fi
+
+    if [ -n "$pgh_cnf" ]; then
+        if [ -f "$pgh_cnf" ]; then
+            pgh_cnf_info=`cat $pgh_cnf | grep -v '^#'`
+        else
+            pgh_cnf_info=`echo $pgh_cnf | tr ',' ' '` 
+        fi
+
+       count=0
+       hostlist=
+       skipcheck=0
+       for host in $pgh_cnf_info
+       do
+         (echo $host  | grep '^#') >/dev/null
+         if [ $? -eq 0 ]; then
+            continue
+         fi
+         if [ -n "`echo $host | grep ":"`" ];then
+            skipcheck=1  #skip if : format is found in hostlist
+            break
+         else
+           count=`expr $count + 1`
+           if [ -z "$hostlist" ]; then
+             hostlist=$host
+           else
+             hostlist="$hostlist $host"
+           fi
+         fi
+       done
+       pgh_cnf=
+       nonzero_rem=0
+       if [ $count -lt $pgh_nprocs  -a $skipcheck -eq 0 ] ; then
+           rem=`expr $pgh_nprocs % $count`
+           block=`expr $pgh_nprocs / $count`
+           if [ $rem -gt 0 ] ; then
+              block=`expr $block + 1`
+              nonzero_rem=1
+           fi
+           for host in $hostlist
+           do
+             if [ $pgh_use_colon -eq 1 ]; then
+                if [ -z "$pgh_cnf" ]; then
+                   pgh_cnf="$host:$block"
+                else
+                   pgh_cnf="$pgh_cnf,$host:$block"
+                fi
+             else
+                i=0
+                if  [  -z "$pgh_cnf" ];  then
+                   pgh_cnf="$host"
+                   i=`expr $i + 1`
+                fi
+                while [ $i -lt $block ]; do
+                   pgh_cnf="$pgh_cnf,$host"
+                   i=`expr $i + 1`
+                done
+             fi
+             if [ $nonzero_rem -eq 1 ] ; then
+               rem=`expr $rem - 1`
+               if [ $rem -eq 0 ] ; then
+                  block=`expr $block - 1`
+                  nonzero_rem=0
+               fi
+             fi
+           done
+           if [ $pgh_use_space -eq 1 ]; then
+             pgh_cnf=`echo $pgh_cnf | tr ',' ' '`
+           fi
+       else
+
+        # for single host and colon output, force colon format
+
+        if [ $pgh_use_colon -eq 1 ]; then
+            if [ "`echo $pgh_cnf_info | awk 'NF < 2'`" != "" ]; then
+                pgh_cnf_info="`echo $pgh_cnf_info | \
+                    awk -F: '{print $1}'`:$pgh_nprocs"
+            fi
+        fi
+
+        # create new host list, optionally limiting size to number of
+        # processes requested and removing colon.
+
+        pgh_cnf=
+        if [ -n "$PARA_MESH_NPROCS" ] ; then
+          skip_host=$PARA_MESH_NPROCS
+        else
+          skip_host=0
+        fi
+        nodetoadd=0
+        ncpu_counter=0
+        while [ $ncpu_counter -lt $pgh_nprocs ]; do # implement wrap around
+            for hostandcount in $pgh_cnf_info
+            do
+                #ignore #ed lines
+                (echo $hostandcount  | grep '^#') >/dev/null
+                if [ $? -eq 0 ]; then
+                    continue
+                fi
+                host=`echo $hostandcount | awk -F: '{print $1}'`
+                count=`echo $hostandcount | awk -F: '{print $2}'`
+                nodetoadd=`expr $pgh_nprocs - $ncpu_counter `
+                if [ -z "$host" ]; then  # handle blank line
+                    continue
+                fi
+                if [ -z "$count" ]; then
+                    count=1
+                fi
+                #For dynamic process spawning, skip the first host since -t1 already spawned
+                if [ -n "$FLUENT_AUTO_SPAWN" -a $skip_host -gt 0 -a $pgh_nprocs -gt 1 ] ; then
+
+                   # If input is already in colon format, need to handle it.
+                    if [ $count -gt 1 ] ; then
+                       if [ $skip_host -le $nodetoadd ] ; then
+                          nodetoadd=`expr $nodetoadd - $skip_host`
+                          skip_host=0
+                       else
+                          skip_host=`expr $skip_host - $nodetoadd`
+                          nodetoadd=0
+                       fi  
+                    else
+                      skip_host=`expr $skip_host - 1`
+                      if [ $count -eq 1 ] ; then
+                         continue
+                      else
+                         count=`expr $count - 1`
+                      fi
+                    fi    
+                fi
+                if [ $count -gt  $nodetoadd ]; then
+                    count=$nodetoadd
+                fi
+                if [ $nodetoadd -eq 0 ] ; then
+                    break;
+                fi
+                if [ $pgh_use_colon -eq 1 ]; then
+                    if [ -z "$pgh_cnf" ]; then
+                        pgh_cnf="$host:$count"
+                    else
+                        pgh_cnf="$pgh_cnf,$host:$count"
+                    fi
+                else
+                    i=0
+                    if  [  -z "$pgh_cnf" ];  then
+                        pgh_cnf="$host"
+                        i=`expr $i + 1`       
+                    fi
+                    while [ $i -lt $count ]; do
+                        pgh_cnf="$pgh_cnf,$host"
+                        i=`expr $i + 1`
+                    done
+                fi
+                ncpu_counter=` expr $ncpu_counter + $count `        
+            done
+        done
+
+        # optionally use space delimiting
+
+        if [ $pgh_use_space -eq 1 ]; then
+            pgh_cnf=`echo $pgh_cnf | tr ',' ' '`
+        fi
+       fi
+   fi
+
+    if [ $FS_STREAMTEST -eq 1  -o $FS_CFLUSH -eq 1 ]; then
+       pgh_cnf=`echo $pgh_cnf | tr ' ' '\n' | sort | uniq`
+       temp=
+       for h in $pgh_cnf
+        do
+          if [ -z "$temp" ]; then
+            temp="$h:1"
+          else
+            temp="$temp $h:1"
+          fi
+       done
+       pgh_cnf=$temp
+    fi
+
+    echo $pgh_cnf
+    return 0
+}
+#------------------------------------------------------------------------------
+# this function creates a hosthost file based on the input hostlist.  The
+# input hostlist is assumed to be of the form "host1:n1,host2:n2 ...." and
+# to have already been limited by the number of requested processes and to
+# include wrap around.
+# 
+# note(s):
+#  - inputs arguments:
+#    -list=<hostlist>  defines hostlist, e.g., "host1:n1,host2:n2 ...."
+#    -f <output_file>  defines the name of the output file
+#  - output:
+#    - return arg: 0 if no error; non-zero otherwise
+#    - the configuration file is written on success.
+#  - doesn't schedule file for deletion, e.g., doesn't modify FL_TMP_FILES
+#
+parallel_create_hostfile () {
+    pch_fn_name=parallel_create_hostfile
+    pch_err=0
+
+    # process input
+    
+    pch_hostlist=
+    pch_cnf_file=
+    while [ $# -gt 0 ]; do
+        case $1 in
+            -list=*)    pch_hostlist=`echo $1 | sed 's/-list=//'`;;
+            -f)         pch_cnf_file=$2;shift;;
+        esac
+        shift
+    done
+
+    if [ -z "$pch_cnf_file" ]; then
+        echo "$pch_fn_name: no output filename supplied with -f option" 1>&2
+        pch_err=1
+    fi
+
+    # create a new cnf file
+
+    if [ $pch_err -eq 0 ]; then
+        pch_hostlist=`echo $pch_hostlist | tr ',' ' '` 
+        printf "" > $pch_cnf_file
+        if [ -f $pch_cnf_file ]; then
+            for h in $pch_hostlist
+            do 
+                echo $h >> $pch_cnf_file
+            done
+        fi
+    fi
+
+    return $pch_err
+}
+#------------------------------------------------------------------------------
+# main program
+#mpirun_fl $*
+#mpirun_fl () {
+
+    # initialize output
+
+    my_err=0
+
+    # extract root directory (if relative path given, find absolute path)
+
+    if [ -z "`echo $0 | grep '^\/'`" ]; then
+        FS_MPTROOT=`echo $0 | sed 's/\/bin\/mpirun.fl/\/../'`
+        FS_MPTROOT=`cd $FS_MPTROOT > /dev/null 2>&1; pwd`
+    else
+        FS_MPTROOT=`echo $0 | sed 's/\/mpi_wrapper\/bin\/mpirun.fl//'`
+    fi
+
+    # process input args
+
+
+    FS_ARCH=none
+    FS_CMD=
+    FS_CNF=
+    FS_MIC_CNF=
+    FS_IC=none
+    FS_IC_VARIANT=default
+    FS_MPI=ibmmpi
+    FS_MPIRUN_FLAGS=
+    FS_NPROC=1
+    FS_PROD=fluent
+    FS_RSHELL=rsh
+    FS_SCHED=
+    FS_DPLACE_DIR=
+    FS_CFLUSH=0
+    FS_STREAMTEST=0
+    FS_TMPDIR=
+
+## For Intel Xeon MIC port
+    FS_MIC_COUNT=0
+
+    while [ $# -gt 0 ]; do
+	case $1 in
+            --arch=*)       FS_ARCH=`echo $1 | sed 's/--arch=//'`;;
+            --cnf=*)        FS_CNF=`echo $1 | sed 's/--cnf=//'`;;
+            --cflush)       FS_CFLUSH=1;;
+            --ic=*)         FS_IC=`echo $1 | sed 's/--ic=//'`;;
+            --ic_variant=*) FS_IC_VARIANT=`echo $1 | sed 's/--ic_variant=//'`;;
+            --mpi=*)        FS_MPI=`echo $1 | sed 's/--mpi=//'`;;
+            --mp_flags=*)   FS_MP_FLAGS=`echo $1 | sed 's/PLF+/ /g' | sed 's/--mp_flags=//'`;;
+            --mpirun_flags=*)
+                FS_MPIRUN_FLAGS=`echo $1 | sed 's/--mpirun_flags=//'`
+                my_quote=`echo $FS_MPIRUN_FLAGS | grep '^\"'`
+                if [ -n "$my_quote" ]; then
+                    my_str=`echo $FS_MPIRUN_FLAGS | sed 's/\"//'`
+                    my_quote=`echo $my_str | grep \"`
+                    while [ -z "$my_quote" ]; do
+                        shift; my_str="$my_str $1"
+                        my_quote=`echo $my_str | grep \"`
+                    done
+                    FS_MPIRUN_FLAGS="`echo \"$my_str\" | sed 's/\"//' `"
+                fi
+                ;;
+            --node_flags=*) FS_NODE_FLAGS=`echo $1 | sed 's/PLF+/ /g' | sed 's/--node_flags=//'`;;
+            --np=*)         FS_NPROC=`echo $1 | sed 's/--np=//'`;;
+            --prefix=*)     FS_MPTROOT=`echo $1 | sed 's/--prefix=//'`;;
+            --prod=*)       FS_PROD=`echo $1 | sed 's/--prod=//'`;;
+            --mic_cnf=*)    FS_CNF=`echo $1 | sed 's/--mic_cnf=//'`;;
+            --rsh=*)        FS_RSHELL=`echo $1 | sed 's/--rsh=//'`;;
+            --sched=*)      FS_SCHED=`echo $1 | sed 's/--sched=//'`;;
+            --stream)       FS_STREAMTEST=1;;
+            --dplacedir=*)  FS_DPLACE_DIR=`echo $1 | sed 's/--dplacedir=//'`;;
+            --fl_node_pre=*)FS_NODE_PRE=`echo $1 | sed 's/PLF+/ /g' | sed 's/--fl_node_pre=//'`;;
+            --exe_cmd=*)    FS_EXE_CMD=`echo $1 | sed 's/PLF+/ /g' | sed 's/--exe_cmd=//'`;;
+            --exe_mic_cmd=*)FS_EXE_MIC_CMD=`echo $1 | sed 's/PLF+/ /g' | sed 's/--exe_mic_cmd=//'`;;
+            -*)             echo "mpirun.fl: invalid option $1" 1>&2;
+                            my_err=1; return $my_err;;
+            *)              break;;  # command & args remain
+        esac
+        shift
+    done
+
+    if [ $FS_STREAMTEST -eq 1 -o $FS_CFLUSH -eq 1 ]; then
+       if [ -z "$FS_CNF" ]; then
+          FS_NPROC=1
+       fi
+    fi
+
+    FLUENT_ARCH=$FS_ARCH
+
+    FS_CMD="$*"
+
+    if [ -z "$FS_IC_VARIANT" ]; then
+        FS_IC_VARIANT=default
+    fi 
+
+    if [ -n "$FL_TMPDIR" ]; then
+        FS_TMPDIR=$FL_TMPDIR
+    else
+        FS_TMPDIR="/tmp"
+    fi 
+
+    # check for input errors
+
+    if [ "$FS_ARCH" = "none" ]; then
+        echo "mpirun.fl: no architecture argument provided" 1>&2
+        my_err=1; return $my_err
+    fi
+    if [ -z "$FS_CMD" ]; then
+        echo "mpirun.fl: no command provided provided" 1>&2
+        my_err=1; return $my_err
+    fi
+    if [ "$FS_IC" = "none" ]; then
+        echo "mpirun.fl: no interconnect argument provided" 1>&2
+        my_err=1; return $my_err
+    fi
+    if [ "$FS_MPTROOT" = "none" ]; then
+        echo "mpirun.fl: no --prefix argument provided" 1>&2
+        my_err=1; return $my_err
+    fi
+    if [ -n "$FS_SCHED" ]; then
+        if [ "$FS_SCHED" != "lsf" -a "$FS_SCHED" != "sge" ]; then
+            echo "mpirun.fl: invalid scheduler: $FS_SCHED" 1>&2
+            my_err=1; return $my_err
+        fi
+    fi
+
+    # apply LSF taskstarter command
+
+    if [ "X_$FS_SCHED" = "X_lsf" -a -n "$LSF_TS_OPTIONS" ]; then
+        my_tscmd=TaskStarter
+        test -n "$LSF_BINDIR" && my_tscmd="${LSF_BINDIR}/$my_tscmd"
+        FS_CMD="$my_tscmd $LSF_TS_OPTIONS $FS_CMD"
+    fi
+
+    # define derived file-scope variables
+
+    FS_MPI_ROOT=$FS_MPTROOT/mpi
+
+    #
+    # perform generic setup
+    # - set load path for MPI wrapper library
+    #
+
+    sys_prepend_ld_library_path "$FS_MPTROOT/mpi_wrapper/$FS_ARCH/$FS_MPI"
+
+    #
+    # run job using MPI-implementation-specific syntax
+    #
+
+    ${FS_MPI}_run
+    retval=$?
+    if [ $retval -ne 0 ]; then
+        exit $retval
+    fi
+
+    #
+    # perform generic cleanup
+    #
+#}
