@@ -71,10 +71,6 @@ openmpi_run ()
         export OPENMPI_ROOT=$EBROOTOPENMPI
         export MALLOC_CHECK_=1
     fi
-<<<<<<< HEAD
-=======
-
->>>>>>> v195
     sys_prepend_ld_library_path "$OPENMPI_ROOT/lib:$OPENMPI_ROOT/lib/openmpi"
     export OPAL_PREFIX=$OPENMPI_ROOT
     
@@ -83,70 +79,8 @@ openmpi_run ()
 
     my_cmdline="srun -n $FS_NPROC $FS_CMD"
 
-<<<<<<< HEAD
-    else
-        ## AFD specific env setup
-        my_envvars=
-        if [ -n "$PYTHONHOME" ]; then
-          my_envvars="-x PYTHONHOME=$PYTHONHOME $my_envvars"
-        fi
-        if [ -n "$AFD_ROOT" ]; then
-          my_envvars="-x AFD_ROOT=$AFD_ROOT $my_envvars"
-          if [ "$FS_ARCH" == "lnamd64" ]; then
-            AFD_ARCH="linx64"; export AFD_ARCH
-          fi
-          if [ -n "$AFD_ARCH" ]; then
-            my_envvars="-x AFD_ARCH=$AFD_ARCH $my_envvars"
-          fi
-        fi
-        if [ -n "$FLUENT_PROD_DIR" ]; then
-          my_envvars="-x FLUENT_PROD_DIR=$FLUENT_PROD_DIR $my_envvars"
-        fi
-
-       if [ -n "$FLUENT_AFFINITY" ]; then
-          my_envvars="-x FLUENT_AFFINITY=$FLUENT_AFFINITY $my_envvars"
-       fi
-
-       if [[ ! -z "$FLUENT_ARCH" ]]; then
-         my_envvars="-x FLUENT_ARCH=$FLUENT_ARCH $my_envvars"
-       fi
-
-        if [ "$FS_ARCH" == "lop64" ]; then
-          my_envvars="-x OMP_WAIT_POLICY=passive $my_envvars"
-        else
-          if [ -n "$FLUENT_KMP_AFFINITY" ]; then
-            my_envvars="-x KMP_AFFINITY=disabled $my_envvars"
-          fi
-        fi
-
-        my_hostlist=`parallel_get_hostlist -n $FS_NPROC -cnf=$FS_CNF \
-            -keepcolon -space`
-#             -space`
-
-        my_cmd=
-
-        # create appfile; fluent node executable launched directly from
-        # mpirun via appfile.
-        my_appfile="$FS_TMPDIR/fluent-appfile.$USER.$$"
-##        echo "# open-mpi app file" > $my_appfile        
-
-        for hostandcount in $my_hostlist
-        do
-            host=`echo $hostandcount | awk -F: '{print $1}'`
-            count=`echo $hostandcount | awk -F: '{print $2}'`
-
-##            echo "$my_per_host_flags -np $count --host $host $FS_CMD" \
-##                >> $my_appfile
-#            my_cmd="$my_cmd $my_per_host_flags -np $count --host $host $FS_CMD"
-             echo $host "slots=$count" >> $my_appfile
-        done
-        
-##       my_cmdline="$my_cmdline --app $my_appfile";
-       my_cmdline="$my_cmdline $my_per_host_flags $my_envvars -np $FS_NPROC --hostfile $my_appfile $FS_CMD";
-=======
     if [ "$FS_ARCH" == "lnamd64" ]; then
       AFD_ARCH="linx64"; export AFD_ARCH
->>>>>>> v195
     fi
 
     # start job
