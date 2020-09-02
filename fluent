@@ -1,0 +1,3403 @@
+#!/bin/sh
+# $RCSfile: header,v $, $Date: 2007/05/08 19:24:24 $, $Revision: 1.15 $ 
+##########################################################################
+##########################################################################
+##                                                                      ##
+##       Copyright 1987-2020 Ansys Inc.                                ##
+##       All Rights Reserved                                            ##
+##                                                                      ##
+##       This is unpublished proprietary source code of ANSYS Inc.     ##
+##       It is protected by U.S. copyright law as an unpublished work   ##
+##       and is furnished pursuant to a written license agreement.  It  ##
+##       is considered by Fluent to be confidential and may not be      ##
+##       used, copied, or disclosed to others except in accordance with ##
+##       the terms and conditions of that agreement.                    ##
+##                                                                      ##
+##########################################################################
+##########################################################################
+
+cmd=$0
+cmdargs=""
+
+echo_command=""
+my_echo ()
+{
+	printf "%s\n" "$*"
+}
+get_echo_command () 
+{
+	if [ "$echo_command" = "" ]; then
+		POSSIBLE_ECHO="my_echo echo /bin/echo /usr/bin/echo /usr/ucb/echo"
+		for c in $POSSIBLE_ECHO; do 
+			if [ -x $c -o "$c" = "echo" -o "$c" = "my_echo" ]; then
+				echo_output=`$c $1`
+				if [ "$1" = "$echo_output" ]; then
+					echo_command=$c
+					break
+				fi
+			fi
+		done 
+		if [ "$echo_command" = "" ]; then
+			echo "Unable to find the proper echo command in: $POSSIBLE_ECHO!"
+			exit
+		fi
+	fi
+}
+get_echo_command "-node"
+
+while [ $# -gt 0 ]; do
+    case $1 in 
+    	-n)
+	    	cmdargs="$cmdargs $1"
+		shift
+		;;
+	*)   
+	        cmdargs="$cmdargs `$echo_command $1 | sed 's/ /PLF+/g'`"
+		shift
+		;;
+    esac		
+done
+
+###End of ../../bin/run-scripts/common/header###
+#------------------------------------------------------------------------------
+# $RCSfile: fluent_inc,v $, $Date: 2005/03/30 22:39:52 $, $Revision: 1.7 $
+fluent_inc () {
+	cmdpath=
+	case $1 in
+		/*)	
+			cmdpath='/';;
+	esac
+	oldIFS=$IFS
+	IFS=/
+	set $1
+	IFS=$oldIFS
+	if [ $# -gt 1 ]; then
+		test -z "$1" && shift	# HP-UX leaves $1 empty, resulting in //
+		cmdpath="$cmdpath$1"
+		shift
+		if [ $# -gt 1 ]; then
+			while [ $# -gt 2 ]
+			do
+				cmdpath="$cmdpath/$1"
+				shift
+			done
+			test "$1" = ".." && cmdpath="$cmdpath/../.."
+			shift
+		else
+			cmdpath="$cmdpath/.."
+		fi
+	else
+		cmdpath="$cmdpath.."
+	fi
+	if [ -z "$FLUENT_PROD" ]; then
+	 	FLUENT_PROD=$1
+		shift
+	fi 
+	if [ -z "$FLUENT_INC" ]; then
+		case $cmdpath in
+    			/*) 
+				FLUENT_INC=$cmdpath;;
+    			*)  
+				FLUENT_INC=`cd $cmdpath; pwd`;;
+  		esac
+	fi
+	FLUENT_INC_bin=$FLUENT_INC/bin 	                        
+# For every upcoming release modify AWP_ROOTxxx to corresponding release number/version
+
+        if [ -z "$AWP_ROOT201" ]; then
+                AWP_ROOT201=`cd "$FLUENT_INC/.." && pwd`
+                shift
+        fi
+
+        if [[ $PATH != *"$FLUENT_INC_bin:"* ]]; then
+	        PATH=$FLUENT_INC_bin:$PATH
+        fi
+	export FLUENT_INC PATH AWP_ROOT201
+#	if [ "X$MYTTY" = "X" ]; then
+#		export MYTTY=`tty`
+#	fi
+}
+
+###End of ../../bin/run-scripts/common/fluent_inc###
+#------------------------------------------------------------------------------
+# $RCSfile: variables,v $, $Date: 2009/10/27 20:34:35 $, $Revision: 1.17 $
+variables () {
+	RUN_SCRIPT=fluent
+        CORBA_LIB=0
+	COMPUTE_NODES_LIST=
+	if [ -z "$CORTEX_ENABLED" ]; then
+		CORTEX_ENABLED=1
+	fi
+	DEVICE=
+	EXE_POST=
+	case `$FLUENT_INC_bin/fluent_arch1.0 $FLUENT_PROD 2>&1` in
+             aix51|hpux11|irix65_mips4|ultra) FLUENT_ARCH_64=1;;
+             *)FLUENT_ARCH_64="";;
+	esac
+        ## Following is now set in fluent_debugger:
+	## if [ -z "$FLUENT_DEBUGGER" ]; then
+	##	FLUENT_DEBUGGER='xterm -e dbx -r'
+	## fi
+	FLUENT_INC_PATH=$FLUENT_INC
+        ANSYS_INC=$FLUENT_INC/../..
+        export ANSYS_INC
+	FLUENT_LSF_PATH=
+        FLUENT_MESHER_SCHEDULER_POST_ARGS=
+        FLUX_MODE=0
+	GUI_ENABLED=$CORTEX_ENABLED
+	HOOPS_DRIVER=
+	HOOPS_DRIVER=
+	HOST_ENABLED=0
+	HOST_FLAGS=host
+	JOURNAL=
+	LIST_DEVICES=
+	LIST_HELP=
+	LIST_RELEASES=
+        if [ -z "$LSF_ENABLED" ] ; then
+          LSF_ENABLED=0
+        fi
+	MPCCI_ENABLED=0
+	LSF_FLAGS=
+	CCI_FLAGS=
+	LSF_OPTIONS=
+	LSF_PAM=
+	NO_EXEC=
+	OLD_GUI_SET=0
+	NODE_ENABLED=0
+	NODE_FLAGS=node
+	PARA_ARCH=
+	PARA_AUTO_SPAWN=#t
+	PARA_CNF=
+	PARA_INTERCONN=
+        PARA_MPI=
+	PARA_LOADHOST=
+	PARA_MPIRUN_FLAGS=
+        if [ -z "$FL_DEFAULT_NPROCS" ] ; then
+          FL_DEFAULT_NPROCS=1
+        fi
+	PARA_NPROCS=$FL_DEFAULT_NPROCS
+        if [ -z "$PARA_MESH_NPROCS" ] ; then
+          PARA_MESH_NPROCS=$FL_DEFAULT_NPROCS
+        fi
+        PARA_MESH_NPROCS_DEFINED=
+	PARA_PART=
+	PARA_TRACE=0
+	PASS_HOST_FLAGS=
+	PASS_NODE_FLAGS=
+	PASS_PROD_FLAGS=
+        PBS_EXIT=0
+#        PBS_ENABLED=0
+	if [ -z "$PREPDF" ]; then
+		PREPDF=$FLUENT_INC/prepdf; export PREPDF
+	fi
+	PROD_FLAGS=
+	RESTART=0
+	RSH=
+	RSHELL=
+	RCOPY=
+	SGI_DPLACE=1
+        SGE_ENABLED=0
+        SGE_EXIT=0
+        if [ -z "$SGE_APP_LAUNCHED" ]; then
+           SGE_APP_LAUNCHED=0;
+        fi
+	SHOW_ENV=
+        if [ -z "$SSH_SPAWN" ] || [ -n "SSH_SPAWN" -a $SSH_SPAWN -ne 0 ]; then
+        	SSH_SPAWN=1
+        fi
+	NO_RUN=
+	if [ -z "$THERMODB" ]; then
+		THERMODB=$PREPDF/db/THERMO.DB; export THERMODB
+	fi
+	VERSION=
+        MPITEST=0
+        STREAMTEST=0
+        if [ -z "$FL_CACHE_FLUSH" ]; then
+          FL_CACHE_FLUSH=0
+        fi
+    MTRACE=0
+    MTRACE1=0
+    GPU=0
+    MULTIPLE_JOURNAL=
+    MULTI_JOU_VAR=0
+}
+
+###End of ./run-scripts/variables###
+#------------------------------------------------------------------------------
+# $RCSfile: listing,v $, $Date: 2004/10/19 15:04:45 $, $Revision: 1.10 $
+list_releases () {
+	echo $*
+	(cd $FLUENT_INC;\
+	   	echo "The releases available in `pwd` area are: ";\
+	   	echo ${FLUENT_PROD}[0-9]* | sed -e '/\*/d' -e "s/${FLUENT_PROD}//g" \
+		| tr ' ' '\012' \
+	     	| sort -n -r -t. -k 1,1 -k 2,2 -k 3,3 )
+	
+	exit 1
+}
+
+
+list_versions () {
+	cd $PROD_ARCH_DIR
+	echo $*
+	echo "The versions available in `pwd` are: "
+	ls -Cd [nd1-9]*
+	exit 1
+}
+
+find_command () {
+	FCMD=`type $* 2> /dev/null`
+  	if [ "`echo $FCMD | awk '{print $2}' 2> /dev/null`" = "is" ]; then
+    		echo $FCMD | awk '{print $3}' 2> /dev/null
+  	fi
+}
+
+execute_remote_command () {		
+	remote_host_name=$1
+	shift
+	remote_command=$*
+	case $FLUENT_ARCH in
+           hpux11* | aix* | power*)
+		remsh $remote_host_name -n $remote_command;;
+	   *)
+                if [ -z "$SSH_SPAWN" ]; then
+		   rsh -n $remote_host_name  $remote_command
+		else
+  		   if [ "$SSH_SPAWN" = 1 ]; then
+		   	ssh -n $remote_host_name  $remote_command
+		   else
+		   	rsh -n $remote_host_name  $remote_command
+		   fi
+		fi
+                ;;
+	esac
+}
+
+remote_copy () {
+        
+        local_file=$1
+        remote_host_list=$2
+        host_done=""
+        if [ $# -gt 2 ]; then
+          remote_file=$3
+        else
+           remote_file=$local_file
+        fi
+        if [ -f "$remote_host_list" ]; then
+                remote_host_list=`cat $remote_host_list`
+        fi
+        remote_host_list=`echo $remote_host_list | tr ',' ' '`
+        for cnfinfo in $remote_host_list ; do
+            hname=`echo $cnfinfo | awk -F: '{print $1}'`
+            hdone=0
+            for h in $host_done; do
+                if [ "$h" = "$hname" ]; then
+                    hdone=1
+                    break;
+                fi
+            done
+            if [ `hostname` != "$hname" -a "$hdone" = "0" ]; then
+                $RCOPY $local_file $hname:$remote_file
+                test_cmd="test -f $remote_file && echo Found$$"
+                if [ -z  "`execute_remote_command $hname  $test_cmd | grep Found$$`"  ]; then
+                        echo "Error- $RCOPY failed : Could not copy $local_file on $hname"
+                        exit 1
+                fi
+                host_done="$host_done $hname"
+            fi
+        done
+
+}
+
+###End of ../../bin/run-scripts/common/listing###
+#------------------------------------------------------------------------------
+# $RCSfile: list_help,v $, $Date: 2008/11/19 14:09:25 $, $Revision: 1.13 $
+list_help ()
+{
+  echo "Usage: $FLUENT_PROD [version] [-help] [options]"
+  echo "options:"
+  echo "  -aas            start Fluent in server mode,"
+  echo "  -act            load ACT Start page,"
+  echo "  -affinity=<core or sock or off>"
+  echo "                  set processor affinity,"
+  echo "                  default (core -- for exclusive mode; sock -- for non-exclusive mode)"
+  echo "                  core - bind to core; sock - bind to socket (options applicable for non-exclusive mode only)"
+  echo "                  off - turn off affinity"
+  echo "  -app=<app>      load the specified App,"
+  echo "  -appscript=<scriptfile>"
+  echo "                  run the specified script in App,"
+  echo "  -cflush         flush the file cache buffer,"
+  echo "  -cnf=<x>        specify the hosts file,"
+  echo "  -driver [ opengl | x11 | null ]"
+  echo "                  sets the graphics driver (available drivers vary by platform),"
+  echo "  -env            show environment variables,"
+  echo "  -g              run without GUI or graphics,"
+  echo "  -gpgpu=<n>      specify number of GPGPUs per machine,"
+  echo "  -gr             run without graphics,"
+  echo "  -gu             run without GUI,"
+  echo "  -gui_machine=<hostname>"
+  echo "                  specify the machine to be used for running graphics-related process,"
+  echo "  -help           this listing,"
+  echo "  -host_ip=<host:ip>"
+  echo "                  specify the ip interface to be used by the host process,"
+  echo "  -i <journal>    read the specified journal file,"
+  echo "  -meshing        run Fluent in meshing mode,"
+  echo "  -mpi=<mpi>      specify MPI implementation; <mpi>={ibmmpi | intel | ...},"
+  echo "  -mpitest        run the mpitest program instead of Fluent to test the network,"
+  echo "  -nm             don't display mesh after reading,"
+  echo "  -pcheck         check the network connections before spawning compute nodes,"
+  echo "  -platform=intel use AVX2 optimized binary. This option is for processors that can support AVX2 instruction set,"
+  echo "  -post           run a post-processing-only executable,"
+  echo "  -p<ic>          specify interconnect; <ic>={default | eth | ib },"
+  echo "  -r              list all releases,"
+  echo "  -r<x>           specify release <x>,"
+  echo "  -remote_node=<hostname>"
+  echo "                  specify the machine to be used for executing mpirun to launch node processes,"
+  echo "                  if =<hostname> is skipped, it will use the first node in the hosts file,"    
+  echo "  -scheduler=<scheduler>"
+  echo "                  specify scheduler name; <scheduler>={lsf | pbs | sge},"
+  echo "  -scheduler_queue=<queue>"
+  echo "                  specify scheduler queue name,"
+  echo "  -scheduler_pe=<pe>"       
+  echo "                  specify scheduler parallel environment; for SGE only,"
+  echo "  -scheduler_opt=<opt>"
+  echo "                  specify scheduler additional option; can be added multiple times,"
+  echo "  -scheduler_tight_coupling"
+  echo "                  enable a job-scheduler-supported native remote node access mechanism,"
+  echo "  -setenv=\"<var>=<value>\" "
+  echo "                  set the environment variable <var> to <value>,"
+  echo "  -sifile=<name>.txt"
+  echo "                  start Fluent and the remote visualization server,"
+  echo "  -stream         print the memory bandwidth,"
+  echo "  -t<x>           specify number of processors <x>,"
+  echo "  -tm<x>          specify number of processors <x> for meshing,"
+  echo " (see User's guide for available options)"
+  exit 0
+}
+
+
+###End of ./run-scripts/list_help###
+#------------------------------------------------------------------------------
+# $RCSfile: command_arguments,v $, $Date: 2010/04/27 14:58:20 $, $Revision: 1.33 $
+
+cross_platform_command () {
+# cross platforms
+if [ -z "$FLUENT_CROSS_PLATFORM_COMMAND" -a -n "$FLUENT_ARCH_REMOTE" ]; then
+    rarch="$FLUENT_ARCH_REMOTE"
+    rhost="$FLUENT_HOST_REMOTE"
+    rinc="$FLUENT_INC_REMOTE"
+    rrsh="$FLUENT_RSH_REMOTE"
+    #rhost
+    if [ -z "$rhost" ]; then
+        if [ -f "$PARA_CNF" ]; then
+            rhost=`cat $PARA_CNF | head -1`
+        else
+            CNF_INFO=`echo $PARA_CNF | tr ',' ' '` 
+            for hostandcount in $CNF_INFO
+            do
+              rhost=$hostandcount
+              break;
+            done
+        fi
+    fi
+
+    #rinc
+    if [ -z "$rinc" ]; then
+        rinc="$FLUENT_INC"
+    fi
+
+    #rrsh
+    if [ -z "$rrsh" ]; then
+        rrsh="rsh"
+        if [ "$SSH_SPAWN" = "1" ]; then
+            rrsh="ssh"
+        fi
+    fi
+
+    #test rrsh; else use socket based remote executor
+    $rrsh $rhost echo 'test' > /dev/null 2> /tmp/fl-test-$$ < /dev/null
+    if [ $? -eq 0 ]; then
+        rm -f /tmp/fl-test-$$
+    else
+        echo "Could not connect to $rhost using $rrsh:"
+        echo `cat /tmp/fl-test-$$`
+        echo "Using FLUENT remote execution mode. Make sure the command server"
+        echo "is started using the command \"flexd.py\" on the remote host machine."
+        rm /tmp/fl-test-$$
+        rrsh="flex_cli.py"
+    fi
+
+    FLUENT_CROSS_PLATFORM_COMMAND="$rrsh $rhost $rinc/bin/fluent"
+
+    while [ $# -gt 0 ]; do
+  	case $1 in
+                -rarch=*) ;;
+                -rhost=*) ;;
+                -rpath=*) ;;
+                -rsh*)   ;;
+                -g)       ;;
+		*) FLUENT_CROSS_PLATFORM_COMMAND="$FLUENT_CROSS_PLATFORM_COMMAND $1";;
+  	esac
+  	shift
+    done
+    FLUENT_CROSS_PLATFORM_COMMAND="$FLUENT_CROSS_PLATFORM_COMMAND -a$rarch"
+    #echo "FLUENT_CROSS_PLATFORM_COMMAND = $FLUENT_CROSS_PLATFORM_COMMAND"
+    export FLUENT_CROSS_PLATFORM_COMMAND
+
+fi
+
+}
+
+command_arguments () {
+if [ $# -gt 0 ]; then
+  	case $1 in
+		-*)		;;
+		*)		VERSION=$1; shift;;
+  	esac
+fi
+
+if [ -z "$IBMOD_FLAG" ]; then
+IBMOD_FLAG=0
+export IBMOD_FLAG
+fi
+
+export GMON_OUT_PREFIX=gmon_clnt  ## Will be changed for "-node" below..
+
+while [ $# -gt 0 ]; do
+  	case $1 in
+		-32)        	echo "Platforms corresponding to the -32 option have been dropped.";;
+		-64)        	case `uname -s` in
+                                    AIX|HP-UX|IRIX64|SunOS) FLUENT_ARCH_64=1;;
+                                    *)FLUENT_ARCH_64="";;
+                                esac;;
+		-a)		FLUENT_ARCH=$2; export FLUENT_ARCH; PARA_ARCH="$FLUENT_ARCH"; shift;;
+                -auto_spawn)    FLUENT_AUTO_SPAWN=1; export FLUENT_AUTO_SPAWN;;
+                -aas*)  CX_FLAGS="$CX_FLAGS $1";CORBA_LIB=1;;
+                -act)   CX_FLAGS="$CX_FLAGS $1";;
+                -app=*) CX_FLAGS="$CX_FLAGS $1";;
+                -appscript=*) CX_FLAGS="$CX_FLAGS $1";;
+                -afd_root=*)    AFD_ROOT=`echo $1 | sed 's/-afd_root=//'`;export AFD_ROOT;AFD_MIXED_MODE=1;;
+                -afd_node_arch=*)    AFD_ARCH=`echo $1 | sed 's/-afd_node_arch=//'`;export AFD_ARCH;;
+                -setenv=*)     export `echo $1 | sed 's/-setenv=//'`;;
+                -affinity=*)    FLUENT_AFFINITY=`echo $1 | sed 's/-affinity=//'`;
+				if [ "$FLUENT_AFFINITY" = "off" ]; then
+                                  FLUENT_AFFINITY=0;
+                                fi
+                                export FLUENT_AFFINITY;;
+    		-a*)		FLUENT_ARCH=`echo $1 | sed 's/-a=*//'`; export FLUENT_ARCH; PARA_ARCH="$FLUENT_ARCH";;
+		-cl*)		PASS_PROD_FLAGS="$PASS_PROD_FLAGS $1 $2"; PROD_FLAGS="$PROD_FLAGS $2"; shift;;
+                -cflush)        FL_CACHE_FLUSH=1;;
+		-cnf=*)		PARA_CNF=`echo $1 | sed 's/-cnf=//'`;;
+		-cxarg)		CX_FLAGS="$CX_FLAGS $2"; shift;;	
+		-cx)		CORTEX_ENABLED=0; CX_FLAGS="$CX_FLAGS $1 $2"; shift;;
+                -spawn_under_sge)if [ -z "$FLUENT_SPAWN_UNDER_SGE" ]; then
+                                 export FLUENT_SPAWN_UNDER_SGE=1
+                                 else
+                                   export FLUENT_SPAWN_UNDER_SGE=0
+                                fi;;
+		-debug)		CLIENT_DEBUG=$2;export CLIENT_DEBUG; shift;;
+		-debugcortex)   CORTEX_DEBUG=$2;export CORTEX_DEBUG; shift;;
+		-debughost) 	FLUENT_PRE=$FLUENT_DEBUGGER; export FLUENT_PRE;;
+    		-debugnode) 	FLUENT_NODE_PRE=$FLUENT_DEBUGGER; export FLUENT_NODE_PRE;; 	
+		-dev*)		HOOPS_DRIVER=$2; shift;;	
+		-display)	DISPLAY=$2;export DISPLAY;shift;;
+    		-driver)	HOOPS_DRIVER=$2; shift;;
+    		-dump)		CORTEX_ENABLED=1;CX_FUNCTION="(dump-scheme \"${FLUENT_PROD}${CX_SINGLE}.dmp\")";;
+                -edu)           FLUENT_EDUCATIONAL=yes; export FLUENT_EDUCATIONAL;;
+		-env)		SHOW_ENV=1;;
+		-norun)   	SHOW_ENV=1;NO_RUN=echo;;
+		-fjmem=*)   	FJMEM=`echo $1 | sed 's/-fjmem=//'`;;
+		-fla)		FLUENT_ARCH_FL=$2; shift;;
+    		-fla*)		FLUENT_ARCH_FL=`echo $1 | sed 's/-fla//'`;;
+                -flux)          FLUX_MODE=1;export FLUX_MODE;;
+		-g)		FLUENT_GUI=off; export FLUENT_GUI; CX_FLAGS="$CX_FLAGS $1";;  
+                -gpgpu=*)       GPU=`echo $1 | sed 's/-gpgpu=//'`; FL_FLAGS="$FL_FLAGS $1";;
+		-hcl*)		PASS_HOST_FLAGS="$PASS_HOST_FLAGS $1 $2"; HOST_FLAGS="$HOST_FLAGS $2"; shift;;	
+		-h)		LIST_HELP=1;;
+		-help)		LIST_HELP=1;;
+		-host)		CORTEX_ENABLED=0; HOST_ENABLED=1;;
+                -host_ip=*)	FLUENT_HOST_IP=`echo $1 | sed 's/-host_ip=//'`;export FLUENT_HOST_IP;;
+                -ibmod_flag)    IBMOD_FLAG=1;export IBMOD_FLAG;;
+		-i)		if [ "$MULTI_JOU_VAR" -eq 0 ]; then
+                    MULTIPLE_JOURNAL=$2;
+                    MULTI_JOU_VAR=1;
+                else
+                    MULTIPLE_JOURNAL="$MULTIPLE_JOURNAL -i $2";
+                fi
+                # DE160207 - Above changes are to read multiple journal files passed by user
+                JOURNAL=$2;shift;;	
+        -level5)    FLUENT_NODE_EXEC_PRE_X="level5"; export FLUENT_NODE_EXEC_PRE_X;
+                    if [ -x "/usr/bin/etherfabric" ]; then
+                        FLUENT_NODE_EXEC_PRE="etherfabric"; export FLUENT_NODE_EXEC_PRE;
+                    else
+                        FLUENT_NODE_EXEC_PRE=""; export FLUENT_NODE_EXEC_PRE;
+                    fi
+                    ;;
+
+		-lic)		FLUENT_FEATURE_SETS=$2;shift;export FLUENT_FEATURE_SETS;;
+		-load*)		PARA_LOADHOST=`echo $1|sed 's/-load//'`; RSH="rsh $PARA_LOADHOST";;
+    		-lsf)		LSF_ENABLED=1; LSF_FLAGS=lsf; export LSF_ENABLED;;
+    		-lsfopt=*)  	LSF_OPTIONS=`echo $1 | sed 's/-lsfopt=//'`;;
+    		-lsfpath*)  	FLUENT_LSF_PATH=`echo $1 | sed 's/-lsfpath//'`;;
+		-manspa)	PARA_AUTO_SPAWN=#f;;
+                -mesh*)         CX_FLAGS="$CX_FLAGS $1";MESHER_MODE=1;export MESHER_MODE;;
+                -mpcci) 	MPCCI_ENABLED=1; 
+				case $2 in
+                                	fluent) CCI_FLAGS="$CCI_FLAGS ccifluent";shift;;
+	                                ansys) CCI_FLAGS="$CCI_FLAGS cciansys";shift;;
+        	                        *) CCI_FLAGS="$CCI_FLAGS cciansys";;
+                	        esac
+                              	;;
+		-mpi=*)  	PARA_MPI=`echo $1 | sed 's/-mpi=//'`;
+                                if [ "$PARA_MPI" == "hp" ]; then
+                                  echo "Warning: The -mpi=hp option is being deprecated. Please use ibmmpi instead of hp, otherwise will use HPMPI v7.1.";
+                                fi
+                                if [ "$PARA_MPI" == "pcmpi" ]; then
+                                  echo "********************"
+                                  echo "Warning: The -mpi=pcmpi option is being deprecated, switching to ibmmpi. Please use ibmmpi instead of pcmpi for future runs.";
+                                  echo "********************"
+                                  PARA_MPI=ibmmpi
+                                fi
+                                ;;
+		-mpiopt=*)  	PARA_MPIRUN_FLAGS=`echo $1 | sed 's/-mpiopt=//'`;;
+		-mpirun=*)      PARA_MPIRUN_COMMAND=`echo $1 | sed 's/-mpirun=//'`;;
+    		-mport)		MP_FLAGS="$MP_FLAGS $1 $2"; shift;;
+    		-mportv)	MP_FLAGS="$MP_FLAGS $1 $2"; shift;;
+    		-mportv2)	MP_FLAGS="$MP_FLAGS $1 $2"; shift;;
+                -mpitest)       MPITEST=1;CORTEX_ENABLED=0;NODE_ENABLED=1;;
+        -mtrace) MTRACE=1; FL_FLAGS="mtrace";;
+        -mtrace=1) MTRACE1=1; FL_FLAGS="mtrace1";;
+		-n)		NO_EXEC=1;;
+		-newcx) CX_FLAGS="$CX_FLAGS $1" ;;
+		-nm) CX_FLAGS="$CX_FLAGS $1" ;;
+		-ncl*)		PASS_NODE_FLAGS="$PASS_NODE_FLAGS $1 $2"; NODE_FLAGS="$NODE_FLAGS $2"; shift;;
+		-nmon)          FLUENT_SKIP_MONITOR_RING=1; export FLUENT_SKIP_MONITOR_RING;;
+		-ncheck)        FLUENT_SKIP_SSH_CHECK=1; export FLUENT_SKIP_SSH_CHECK;;
+		-mallopt=*)     FLUENT_MALLOPT_SETTING=`echo $1 | sed 's/-mallopt=//'`;export FLUENT_MALLOPT_SETTING;;
+		-node)		CORTEX_ENABLED=0; NODE_ENABLED=1; export GMON_OUT_PREFIX=gmon_node;;
+    		-nodplace)  	SGI_DPLACE=0;;
+		-nspawn)        FLUENT_AUTO_SPAWN_DISABLE=1; export FLUENT_AUTO_SPAWN_DISABLE;;
+		-null)		HOOPS_DRIVER=`echo $1 | sed 's/-//'`;; 
+		-opengl)	HOOPS_DRIVER=`echo $1 | sed 's/-//'`;; 
+		-oldcx) OLD_GUI_SET=1;;
+                -pbs)           PBS_ENABLED=1; export PBS_ENABLED;; # PBS flags are processed in loadmanager script
+		-p)         	PARA_INTERCONN=default;;
+		-part*)		PARA_PART=`echo $1 | sed 's/-part//'`;;
+    		-path*)		FLUENT_INC_PATH=`echo $1 | sed 's/-path//'`;;
+        	-pcheck)	FLUENT_CHECK_NETWORK=1;export FLUENT_CHECK_NETWORK;;
+                -platform=*)    PLATFORM=`echo $1 | sed 's/-platform=//'`;
+				if [ "$PLATFORM" = "intel" ]; then
+                                  FL_PLATFORM_ARCH=linmic; export FL_PLATFORM_ARCH;
+                                  FL_INTEL_MIC=1; export FL_INTEL_MIC;
+				elif [ "$PLATFORM" = "power" ]; then
+                                  FL_PLATFORM_ARCH=lop64; export FL_PLATFORM_ARCH;
+                                  PARA_MPI=openmpi
+				elif [ "$PLATFORM" = "arm" ]; then
+                                  FL_PLATFORM_ARCH=lnarm64; export FL_PLATFORM_ARCH;
+                                  PARA_MPI=openmpi
+                                fi;;
+		-port:*)        CX_FLAGS="$CX_FLAGS $1";;
+                -post)          FLUENT_POST=yes; export FLUENT_POST;;
+    		-prn)       	PROD_FLAGS=-prn;;
+		-project)	FLUENT_PROJECT="$2"; export FLUENT_PROJECT; shift;;
+    		-ptrace)	PARA_TRACE=1;;
+    		-ptrace=*)  	PARA_TRACE=`echo $1 | sed 's/-ptrace=//'`;;
+		-p*)		PARA_INTERCONN=`echo $1 | sed 's/-p//'`;
+                                case $PARA_INTERCONN in
+                                     myri | myrinet)
+                                       if [ "$NODE_ENABLED" = "1" ]; then
+                                          echo "********************"
+                                          echo "Warning: The Myrinet interconnect is no longer supported.";
+                                          echo "********************"
+                                       fi
+                                esac
+                                ;;
+		-r)		LIST_RELEASES=1;;
+		-r[0-9]*)	RELEASE=`echo $1 | sed 's/-r//'`
+				case $RELEASE in
+  					4*)
+		 				exec fluent4 $cmdargs;;
+				esac
+				;;
+		-re)        	PROD_FLAGS=-re;;
+		-restart)	RESTART=1;;
+                -rarch=*) FLUENT_ARCH_REMOTE=`echo $1 | sed 's/-rarch=//'`;export FLUENT_ARCH_REMOTE;;
+                -rhost=*) FLUENT_HOST_REMOTE=`echo $1 | sed 's/-rhost=//'`;export FLUENT_HOST_REMOTE;;
+                -rpath=*) FLUENT_INC_REMOTE=`echo $1  | sed 's/-rpath=//'`;export FLUENT_INC_REMOTE ;;
+                -rsh*)    SSH_SPAWN=0; export SSH_SPAWN; FLUENT_RSH_REMOTE=`echo $1  | sed 's/-rsh=//'`  ;export FLUENT_RSH_REMOTE ;;
+		-s)		CX_SINGLE="_s"; CORTEX_ENABLED=0;;
+                -serv)          ;;
+                -scheduler_tight_coupling*) SCHEDULER_TIGHT_COUPLING=1; export SCHEDULER_TIGHT_COUPLING; SCHEDULER_TIGHT_COUPLING_OPT=`echo $1  | sed 's/-scheduler_tight_coupling=//'`;export SCHEDULER_TIGHT_COUPLING_OPT;;
+                -sge)           SGE_ENABLED=1; SGE_FLAGS=sge; export SGE_ENABLED;;
+                -sgeq)          SGE_QUEUE=" -q $1"; FLUENT_MESHER_SCHEDULER_POST_ARGS="$FLUENT_MESHER_SCHEDULER_POST_ARGS -sgeq $2";shift;;
+                -sgeckpt)       SGE_CKPT_OPT=" -ckpt $1";   shift;;
+                -sgepe)         SGE_PE_OPT=" -pe $1"; FLUENT_MESHER_SGE_PE_OPT="-sgepe $2"; export FLUENT_MESHER_SGE_PE_OPT; shift;
+                                SGE_PE_OPT="$SGE_PE_OPT $1";
+                                if [ -z $FLUENT_AUTO_SPAWN ]; then
+                                  PARA_NPROCS=$2;
+                                fi
+                                shift;;
+                -sgeup)         SGE_ENABLED=1; SGE_FLAGS=sge;;
+                -sgelaunch)     SGE_APP_LAUNCHED=1; FLUENT_MESHER_SCHEDULER_POST_ARGS="$FLUENT_MESHER_SCHEDULER_POST_ARGS -sgelaunch"; export SGE_APP_LAUNCHED;;
+                -sgeqmaster)    shift;;
+                -sgeopt=*)	SGE_OPTIONS=`echo $1 | sed 's/-sgeopt=//'`;;
+		-slurm)		SLURM_ENABLED=1; export SLURM_ENABLED;;
+		-ssh)   	SSH_SPAWN=1;;
+                -stream)        STREAMTEST=1;CORTEX_ENABLED=0;NODE_ENABLED=1;;
+                -tm | -TM)      PARA_MESH_NPROCS=$2;shift; export PARA_MESH_NPROCS;
+                                PARA_MESH_NPROCS_DEFINED=1;
+                                if [ -z "$FL_PARA_DEFAULT_MODE" ]; then
+                                  export FL_PARA_DEFAULT_MODE=0
+                                fi
+                                if [ $PARA_MESH_NPROCS -lt 0 ]; then
+                                   echo "Error: Invalid process count -tm$PARA_MESH_NPROCS."
+                                exit
+                                fi
+                                ;;
+                -tm* | -TM*)    PARA_MESH_NPROCS=`echo $1 | sed 's/-tm//'`; export PARA_MESH_NPROCS;
+                                PARA_MESH_NPROCS_DEFINED=1;
+                                if [ -z "$FL_PARA_DEFAULT_MODE" ]; then
+                                  export FL_PARA_DEFAULT_MODE=0
+                                fi
+                                if [ $PARA_MESH_NPROCS -lt 0 ]; then
+                                   echo "Error: Invalid process count -tm$PARA_MESH_NPROCS."
+                                exit
+                                fi
+                                ;;
+		-t | -T)        PARA_NPROCS=$2;
+                                if [ -z "$FL_PARA_DEFAULT_MODE" ]; then
+                                  export FL_PARA_DEFAULT_MODE=0
+                                fi
+                                if [ $PARA_NPROCS -lt 0 ]; then
+                                   echo "Error: Invalid process count -t$PARA_NPROCS.";
+                                exit
+                                fi
+                                shift;;
+		-t* | -T*)	PARA_NPROCS=`echo $1 | sed 's/-t//'`;
+                                if [ -z "$FL_PARA_DEFAULT_MODE" ]; then
+                                  export FL_PARA_DEFAULT_MODE=0
+                                fi
+                                if [ $PARA_NPROCS -lt 0 ]; then
+                                   echo "Error: Invalid process count -t$PARA_NPROCS.";
+                                exit
+                                fi
+                                ;;
+		-v)		LIST_VERSIONS=1;;
+		-v[1-9]*)	VERSION=`echo $1 | sed 's/-v//'`;; 
+                -wrapper=libCOWrapper.so) CORBA_LIB=1; 
+                                CX_FLAGS="$CX_FLAGS $1";;
+		-x11)		HOOPS_DRIVER=`echo $1 | sed 's/-//'`;;  
+		[23]d*)		VERSION=$1;;
+		*)		CX_FLAGS="$CX_FLAGS $1";;
+  	esac
+  	shift
+done
+
+      export PARA_NPROCS
+      if [ -z "$VERSION" ]; then
+         PARA_NPROCS=0
+      fi
+
+        if [ $PARA_NPROCS -gt 4096 ]; then
+         if [ "$PARA_MPI" = "ibmmpi" -o -z "$PARA_MPI" ]; then
+           echo "Error: The Platform MPI software included with ANSYS products allows for a maximum of 4096 processes to be included in a single parallel calculation."
+           echo "       You will need to obtain an additional license from International Business Machines Corp. (IBM) for higher process counts."
+           echo "       Alternatively, you can use the Intel MPI option in the settings for your parallel calculation."
+           exit
+         fi
+       fi
+
+      if [ "$MESHER_MODE" = "1" ]; then
+
+        if [ -z "$PARA_MESH_NPROCS_DEFINED" -a -z "$FLUENT_AUTO_SPAWN" ]; then
+          if [ "$PARA_NPROCS" -ne "$FL_DEFAULT_NPROCS" ]; then
+             PARA_MESH_NPROCS=$PARA_NPROCS
+          fi
+        fi
+
+        if [ "$PARA_MESH_NPROCS" -eq 0 -a "$PARA_NPROCS" -gt 0 ]; then
+          PARA_MESH_NPROCS=$PARA_NPROCS
+        fi
+        if [ -z "$FLUENT_AUTO_SPAWN" -a -z "$FLUENT_CHECK_PROC_COUNT" -a "$PARA_MESH_NPROCS" -gt 0 ]; then
+          if [ $PARA_NPROCS -eq 0 ]; then # For cases where -t0 flag is used, along with -tm<mesh_proc>.
+            PARA_NPROCS=$PARA_MESH_NPROCS
+          fi
+          if [ $PARA_NPROCS -lt $PARA_MESH_NPROCS ]; then
+            PARA_NPROCS=$PARA_MESH_NPROCS
+            echo "Warning: Total solver processes count need to be greater or equal to meshing processes count, so resetting the count -t$PARA_NPROCS."
+          fi
+          export FLUENT_CHECK_PROC_COUNT=0
+        fi
+        if [ -n "$SGE_ENABLED" -o -n "$LSF_ENABLED" -o -n "$PBS_ENABLED" ]; then
+           FLUENT_UNDER_MESHER_LM=1;export FLUENT_UNDER_MESHER_LM
+        fi
+
+        if [ -n "$FLUENT_MESHER_SCHEDULER_POST_ARGS" ]; then
+           export FLUENT_MESHER_SCHEDULER_POST_ARGS
+        fi
+        export PARA_MESH_NPROCS
+      else
+        if [ "$PARA_MESH_NPROCS" -gt "$FL_DEFAULT_NPROCS" -a "$PARA_NPROCS" -eq "$FL_DEFAULT_NPROCS" ]; then
+          PARA_NPROCS=$PARA_MESH_NPROCS
+          echo "Warning: -tm$PARA_MESH_NPROCS flag is used instead of -t$PARA_MESH_NPROCS for Solver mode, resetting it."
+        fi
+      fi
+
+      if [ "$PARA_NPROCS" -eq 0 -a "$GPU" -gt 0 ]; then
+        GPU=0
+      fi
+
+      if [ -z "$KMP_AFFINITY" ]; then
+         export KMP_AFFINITY=disabled
+         export FLUENT_KMP_AFFINITY=1
+      else
+         if [ -z "$FLUENT_KMP_AFFINITY" ]; then
+            echo ""
+            echo "*******************************************";
+            echo "WARNING:Found KMP_AFFINITY=$KMP_AFFINITY setting in the env";
+            echo "*******************************************";
+         fi
+      fi
+
+      if [  "$FL_PLATFORM_ARCH" = "lop64" -o  "$FL_PLATFORM_ARCH" = "lnarm64" ]; then
+           if [ -z "$PARA_CNF" ]; then
+             echo "*******************************************";
+             echo "ERROR: Need to specify host file to be able to run on $FL_PLATFORM_ARCH platform."
+             echo "*******************************************";
+             exit 1
+           else
+             FLUENT_HOSTS_FILE=$PARA_CNF; export FLUENT_HOSTS_FILE
+           fi
+           if [ "$PARA_MPI" != "openmpi" ]; then
+             echo "*******************************************";
+             echo "WARNING: On $FL_PLATFORM_ARCH platform only OpenMPI is supported, so switching to openmpi."
+             echo "*******************************************";
+             PARA_MPI=openmpi
+           fi
+           if [[ ! $PARA_MPIRUN_FLAGS = *"--bind-to"* ]]; then
+               PARA_MPIRUN_FLAGS=$PARA_MPIRUN_FLAGS"PLF+--bind-toPLF+none"
+           fi
+       fi
+
+
+    cross_platform_command $cmdargs
+}
+
+###End of ./run-scripts/command_arguments###
+#------------------------------------------------------------------------------
+fluent_release () {
+	if [ -n "$RELEASE" ]; then
+		PARA_RELEASE=$RELEASE
+	fi
+}
+###End of ./run-scripts/fluent_release###
+#------------------------------------------------------------------------------
+existant_release_archs ()
+{
+	if [ -z "$PROD_ARCH_DIR" ]; then
+	if [ -z "$FLUENT_ARCH" ]; then
+		existant_archs=""
+
+		arch_output=`$FLUENT_INC_bin/fluent_arch1.0 $FLUENT_PROD 2>&1`
+		word_arch_output=`echo $arch_output | wc -w`
+		if [ $word_arch_output =  "1" ]; then
+			if [ -n "$FLUENT_ARCH_64" ]; then
+				arch_output=${arch_output}_64
+			fi
+			existant_archs="$existant_archs $arch_output"
+		fi
+		arch_output=`$FLUENT_INC_bin/fluent_arch $FLUENT_PROD 2>&1`
+		word_arch_output=`echo $arch_output | wc -w`
+		if [ $word_arch_output =  "1" ]; then
+			if [ -n "$FLUENT_ARCH_64" ]; then
+				arch_output=${arch_output}_64
+			fi
+			existant_archs="$existant_archs $arch_output"
+		fi
+
+		if [ -z "$existant_archs" ]; then
+  			echo "Unable to determine machine architecture."
+  			echo "Set the environment variable FLUENT_ARCH and try again."
+  			exit 1
+		fi
+	else
+		existant_archs="$FLUENT_ARCH"
+### With Fluent, Only cortex needs to check this (Since for nodes FLUENT_ARCH 
+### will be defined by default by cortex
+### Viewfac needs to set this value here since there it directly launches parallel job
+    if [ "$CORTEX_ENABLED" = "1" -o  "$FLUENT_PROD" = "viewfac" ]; then
+       PARA_ARCH="$FLUENT_ARCH"
+    fi
+    if [ "$CORTEX_ENABLED" = "1" -o  "$FLUENT_PROD" = "raytracing" ]; then
+       PARA_ARCH="$FLUENT_ARCH"
+    fi
+	fi
+
+	release_archs=""
+	
+	if [ -z "$RELEASE" ]; then
+		for existant in $existant_archs; do
+			for f in $FLUENT_INC/$FLUENT_PROD[0-9]*/$existant; do
+				if [ "$f" != "$FLUENT_INC/$FLUENT_PROD[0-9]*/$existant" ]; then
+					release_archs="$release_archs $FLUENT_INC/$FLUENT_PROD[0-9]*/$existant"
+					break
+				fi
+			done
+		done
+		if [ -z "$release_archs" ]; then
+  			echo "Error: directory $FLUENT_INC/$FLUENT_PROD[0-9]* does not contain a valid arch."
+			echo "Set the environment variable FLUENT_ARCH and try again."
+  			exit 1
+		fi
+	else
+		for existant in $existant_archs; do
+			if [ -d "$FLUENT_INC/${FLUENT_PROD}$RELEASE/$existant" ]; then
+				release_archs="$release_archs $FLUENT_INC/${FLUENT_PROD}$RELEASE/$existant"
+				break
+			fi
+		done
+		if [ -z "$release_archs" ]; then
+  			echo "Error: directory $FLUENT_INC/${FLUENT_PROD}$RELEASE does not contain a valid arch."
+			echo "Set the environment variable FLUENT_ARCH and try again."
+  			exit 1
+		fi	
+	fi
+	fi
+	
+}
+
+###End of ../../bin/run-scripts/common/existant_release_archs###
+#------------------------------------------------------------------------------
+# $RCSfile: release,v $, $Date: 2007/06/01 17:22:56 $, $Revision: 1.19 $
+release () {
+	if [ -z "$PROD_ARCH_DIR" ]; then
+	if [ -z "$FLUENT_ARCH" ]; then
+   		FLUENT_ARCH=`cd $FLUENT_INC \
+			| echo $release_archs \
+			| sed "s;$FLUENT_INC/$FLUENT_PROD;;g" \
+			| tr ' ' '\012' \
+			| sort -n -r -t. -k 1,1 -k 2,2 -k 3,3 \
+                        | head -n 1 \
+			| sed "s;.*/;;g" `
+	fi
+	export FLUENT_ARCH
+	
+	if [ -z "$RELEASE" ]; then
+   		RELEASE=`cd $FLUENT_INC \
+			| echo $release_archs \
+			| sed "s;$FLUENT_INC/$FLUENT_PROD;;g" \
+			| sed "s;/$FLUENT_ARCH;;g" \
+			| tr ' ' '\012' \
+			| sort -n -r -t. -k 1,1 -k 2,2 -k 3,3 \
+			| head -n 1 `
+	fi
+	MAJOR_RELEASE=`echo $RELEASE | awk -F. '{print $1}'`
+	MINOR_RELEASE=`echo $RELEASE | awk -F. '{print $2}'`
+	
+	PROD_DIR=$FLUENT_INC/${FLUENT_PROD}${RELEASE}
+	if [ "$FLUENT_PROD" = "fe2ram" ]; then
+	CFX5_UNITS_DIR=$PROD_DIR/resources
+        export CFX5_UNITS_DIR
+	fi
+	
+	if [ ! -d $PROD_DIR ]; then
+  		echo "Error: directory $PROD_DIR does not exist."
+  		exit 1
+	fi
+	if [ -z "$PROD_ARCH_DIR" ]; then
+		PROD_ARCH_DIR=$PROD_DIR/$FLUENT_ARCH
+                if [ -n "$FL_PLATFORM_ARCH" ]; then
+                   PROD_PLATFORM_ARCH_DIR=$PROD_DIR/$FL_PLATFORM_ARCH
+                fi
+	fi
+
+	if [ ! -d $PROD_ARCH_DIR ]; then
+		echo "Error: directory $PROD_ARCH_DIR does not exist."
+  		exit 1
+	fi
+	fi
+	FP=$FLUENT_PROD
+}
+
+###End of ../../bin/run-scripts/common/release###
+#------------------------------------------------------------------------------
+print_patch ()
+{
+	PATCHES=`cd $PROD_DIR;find * -type d -prune -o -name patch_\*.txt -print | sed 's/\.txt//'`
+	PATCHES_ARCH=`test -d $PROD_ARCH_DIR && (cd $PROD_ARCH_DIR;find * -type d -prune -o -name patch_\*.txt -print | sed 's/\.txt//')`
+	if [ -n "$PATCHES" -o -n "$PATCHES_ARCH" ]; then
+		echo "================================================="
+		echo "This product has the following patch(es) applied:"
+		echo $PATCHES $PATCHES_ARCH | tr " " "\n"
+		echo ""
+		echo "You can find more information about the patch(es) in the"
+		echo "respective text file(s) located at:"
+		test -n "$PATCHES" && echo "$PROD_DIR"
+		test -n "$PATCHES_ARCH" &&  echo "$PROD_ARCH_DIR"
+		echo "================================================="
+	fi
+}
+
+###End of ../../bin/run-scripts/common/print_patch###
+#------------------------------------------------------------------------------
+# $RCSfile: fluent_architecture,v $, $Date: 2005/12/02 15:02:14 $, $Revision: 1.1 $
+fluent_architecture () {
+	case $RELEASE in
+        	 5*) FLUENT_ARCH_SCRIPT=$FLUENT_INC_bin/fluent_arch;;
+         	*)  FLUENT_ARCH_SCRIPT=$FLUENT_INC_bin/fluent_arch1.0;;
+	esac
+
+}
+
+###End of ./run-scripts/fluent_architecture###
+#------------------------------------------------------------------------------
+# $RCSfile: architecture,v $, $Date: 2006/02/07 19:58:29 $, $Revision: 1.16 $
+architecture () {
+	if [ -n "$FLUENT_ARCH_64" ]; then
+		PARA_ARCH="$FLUENT_ARCH"
+	fi
+	
+	if [ $FLUENT_ARCH = decmips ]; then
+		if [ "$SHELL" != "/bin/sh5" ]; then
+			SHELL=/bin/sh5; export SHELL
+			exec ${SHELL} $cmd $cmdargs
+		else
+			SHELL=/bin/sh; export SHELL
+		fi
+	fi
+
+	case $FLUENT_ARCH in
+    		ultra_64)
+      			case `uname -r` in
+        			5.4 | 5.5 | 5.5.1 | 5.6)
+          				echo "Error: The 64-bit version is unavailable for this OS."; exit 1;;
+      			esac;;
+		lnx86)
+			if [ "$FLUENT_PROD" = "fluent" ]; then
+				if [ "$MAJOR_RELEASE" = "6" -a "$MINOR_RELEASE" = "2" ]; then
+		       			FLUENT_GLIBC=`rpm -q glibc | grep glibc-2.2`
+		       			if [ -n "$FLUENT_GLIBC" ]; then
+		               			FLUENT_ARCH=lnx86_glibc22; export FLUENT_ARCH
+		       			fi
+				fi
+			fi
+			;;
+	esac
+
+	RSHELL=rsh
+	RCOPY=rcp
+	if [ "$FLUENT_ARCH" = "hpux11" -o "$FLUENT_ARCH" = "hpux11_64" -o "$FLUENT_ARCH" = "hpux11_ia64" ]; then
+		RSHELL=remsh
+                RCOPY=rcp
+	fi
+	test -n "$SSH_SPAWN" && if [ "$SSH_SPAWN" -eq 1 ]; then
+	        if [ -n "$FLUENT_SSH" ]; then
+		        RSHELL="$FLUENT_SSH"
+                        echo using remote shell "$RSHELL"
+                else
+		        RSHELL=ssh
+	        fi
+		RCOPY=scp
+                export RSHELL
+                export RCOPY
+	fi
+        if [ -n "$REMOTE_COPY_COMMAND" ]; then
+                RCOPY=$REMOTE_COPY_COMMAND
+        fi
+	if [ -z "$CONTRIB" ]; then 
+		CONTRIB=$FLUENT_INC/contrib/$FLUENT_ARCH
+	fi
+	if [ -d $CONTRIB ]; then
+                if [[ $PATH != *"$CONTRIB:"* ]]; then
+			PATH="$CONTRIB:$PATH"
+                fi
+  		export PATH
+	fi
+}
+
+###End of ../../bin/run-scripts/common/architecture###
+#------------------------------------------------------------------------------
+# $RCSfile: cortex_app_architecture,v $, $Date: 2001/08/01 14:56:07 $, $Revision: 1.2 $
+cortex_app_architecture () {
+	if [ $FLUENT_ARCH = irix5 -a $CORTEX_ENABLED -eq 1 ]; then
+		SGI_DISPLAY=`xdpyinfo | fgrep SGI-SUNDRY`
+		if [ -z "$SGI_DISPLAY" ]; then
+			__SGI_NO_REMOTE_GL=1;
+			export __SGI_NO_REMOTE_GL
+		fi
+	fi
+}
+###End of ../../bin/run-scripts/common/cortex_app_architecture###
+#------------------------------------------------------------------------------
+echo_arch_info () {
+	arch_info_dir=$FLUENT_INC/license
+	arch_info_file=arch_info
+	arch_info=$arch_info_dir/$arch_info_file
+	if [ -w "$arch_info" ]; then
+		month=`date +%m`
+		exist=`tail -n 1 $arch_info | grep "^$month"`
+
+                # use either PARA_VERSION (<6.3) or PARA_MPI for communicator
+                para_attr=$PARA_VERSION
+                test -z "$para_attr" && para_attr=$PARA_MPI
+                para_attr="$para_attr : $PARA_NPROCS :"
+                
+		entry="$FLUENT_PROD : $FLUENT_ARCH : `uname -s` : `uname -m` : `uname -r` : $*: $para_attr"
+		if [ -z "$exist" ]; then
+			count="1"
+			echo  "$month : $count : $entry" >> $arch_info
+		else
+			old_count=`grep "^$month : [0-9]* :" $arch_info | fgrep "$entry" | tail -n 1 | awk -F: '{print $2}'`
+			line_num=`grep -n "^$month : [0-9]* :" $arch_info | fgrep "$entry" | tail -n 1 | awk -F: '{print $1}'`
+			if [ -z "$old_count" ]; then
+				count="1"
+				echo  "$month : $count : $entry" >> $arch_info
+			else
+				count=`expr $old_count + 1`
+				sed "${line_num}s/^$month :$old_count:/$month : $count :/" $arch_info > /tmp/temp_$$
+				cp /tmp/temp_$$ $arch_info
+				rm -f /tmp/temp_$$	
+			fi
+		fi
+		chmod ugo+w $arch_info
+	fi	
+}
+
+###End of ../../bin/run-scripts/common/echo_arch_info###
+#------------------------------------------------------------------------------
+arch_info () {
+	case $FLUENT_ARCH in
+		aix*)		echo_arch_info `oslevel` `uname -M`;;
+		alpha)	
+				if [ -x /usr/sbin/sizer ]; then	
+					echo_arch_info `/usr/sbin/sizer -v | sed 's/;..*//'` `/usr/sbin/sizer -implver`
+				else
+					echo_arch_info `uname -v`
+				fi;;
+		irix*) 		echo_arch_info `hinv -t cpu`;;
+		lnx86* | lnia64 | lnamd64)
+				if [ -f /etc/issue ]; then 		
+					echo_arch_info `grep -i linux /etc/issue`
+				elif [ -f /etc/issue.net ]; then
+					echo_arch_info `grep -i linux /etc/issue.net`
+				else
+					echo_arch_info
+				fi;;
+		power*)		echo_arch_info `oslevel` `uname -M`;;
+		sun4) 		echo_arch_info `uname -i -m`;;
+		*)		echo_arch_info;;
+	esac
+}
+
+###End of ../../bin/run-scripts/common/arch_info###
+#------------------------------------------------------------------------------
+# $RCSfile: pre_execute,v $, $Date: 2001/08/01 14:56:12 $, $Revision: 1.2 $
+pre_execute () {
+	if [  -n "$LIST_HELP" ]; then
+		list_help "$usage"
+		exit 0
+	fi
+
+	if [  -n "$LIST_RELEASES" ]; then
+		list_releases
+		exit 0
+	fi
+
+	if [ -n "$LIST_VERSIONS" ]; then
+		list_versions "$usage"
+		exit 0
+	fi
+}
+###End of ../../bin/run-scripts/common/pre_execute###
+#------------------------------------------------------------------------------
+#
+# this file contains system-specific utility functions
+#
+
+# removes from system-specific shared library path
+# (first argument is the directory to remove)
+sys_remove_ld_library_path ()
+{
+    shared_lib_dir=$1
+    LD_LIBRARY_PATH=${LD_LIBRARY_PATH//$shared_lib_dir:/}
+}
+
+# prepends to system-specific shared library path
+# (first argument is the directory to prepend)
+sys_prepend_ld_library_path ()
+{
+    shared_lib_dir=$1
+
+    LD_LIBRARY_PATH=${LD_LIBRARY_PATH//$shared_lib_dir:/}
+    LD_LIBRARY_PATH="$shared_lib_dir:$LD_LIBRARY_PATH"
+
+    case $FLUENT_ARCH in
+        aix*) 
+            LIBPATH="$shared_lib_dir:$LIBPATH"; 
+            export LIBPATH 
+            ;; 
+        hpux*)
+            SHLIB_PATH="$shared_lib_dir:$SHLIB_PATH";
+            export SHLIB_PATH
+            ;;
+        irix*)
+            LD_LIBRARYN32_PATH="$shared_lib_dir:$LD_LIBRARYN32_PATH";
+            export LD_LIBRARYN32_PATH
+            ;;    
+        power*) 
+            LIBPATH="$shared_lib_dir:$LIBPATH"; 
+            export LIBPATH 
+            ;; 	
+	esac
+}
+
+# appends to system-specific shared library path
+# (first argument is the directory to append)
+sys_append_ld_library_path ()
+{
+    shared_lib_dir=$1
+
+    if [[ $LD_LIBRARY_PATH != *"$shared_lib_dir:"* ]]; then
+        LD_LIBRARY_PATH="$LD_LIBRARY_PATH:$shared_lib_dir:"
+        export LD_LIBRARY_PATH
+    fi
+
+    case $FLUENT_ARCH in
+        aix*) 
+            LIBPATH="$LIBPATH:$shared_lib_dir"; 
+            export LIBPATH 
+            ;; 
+        hpux*)
+            SHLIB_PATH="$SHLIB_PATH:$shared_lib_dir";
+            export SHLIB_PATH
+            ;;
+        irix*)
+            LD_LIBRARYN32_PATH="$LD_LIBRARYN32_PATH:$shared_lib_dir";
+            export LD_LIBRARYN32_PATH
+            ;;    
+        power*) 
+            LIBPATH="$LIBPATH:$shared_lib_dir"; 
+            export LIBPATH 
+            ;; 	
+	esac
+}
+
+###End of ./run-scripts/sys_utility###
+#------------------------------------------------------------------------------
+# $RCSfile: parallel_setup,v $, $Date: 2009/11/06 11:43:43 $, $Revision: 1.37 $
+parallel_setup ()
+{
+    # note(s):
+    #  - "net" must be resolved in cortex instance; see cortex_to_host.
+
+    # define multiport directory
+
+    PARA_MPORT_ROOT="$PROD_DIR/multiport"
+
+    # set values for unsupplied parallel input
+
+    if [ "$PARA_NPROCS" -gt 0 -a -z "$PARA_INTERCONN" ]; then
+        PARA_INTERCONN=default
+    elif [ "$PARA_NPROCS" -lt 1 -a -n "$PARA_INTERCONN" ]; then
+        if [ -z "$PARA_CNF" ]; then
+            PARA_NPROCS=$FL_DEFAULT_NPROCS
+        else
+            # extract PARA_NPROCS from PARA_CNF definition
+            PARA_NPROCS=0
+            if [ -f "$PARA_CNF" ]; then
+                CNF_INFO=`cat $PARA_CNF | grep -v '^#'`
+            else
+                CNF_INFO=`echo $PARA_CNF | tr ',' ' '` 
+            fi
+
+            for hostandcount in $CNF_INFO
+            do
+                #ignore #ed lines
+                (echo $hostandcount | grep '^#') >/dev/null
+                if [ $? -eq 0 ]; then
+                    continue
+                fi
+                count=`echo $hostandcount | awk -F: '{print $2}'`
+                if [ -z "$count" ]; then
+                    count=1
+                fi
+                PARA_NPROCS=`expr $PARA_NPROCS + $count`
+            done
+        fi
+    fi
+
+    if [ "$PARA_NPROCS" -gt 0 -a -z "$PARA_MPI" ]; then
+        PARA_MPI=default
+    fi
+
+    if [ $SSH_SPAWN -eq 1 -a -z "$FLUENT_SKIP_SSH_CHECK" -a $NODE_ENABLED -eq 1 ]; then
+       check_ssh_config
+    fi
+
+    # check and optionally resolve interconnect and MPI
+    #
+    # this can be done either in the cortex or node instance; the cortex
+    # instance is preferred so error checking may be done before cortex
+    # window is opened.  However, if fluent is started in the GUI with
+    # file->run menu item, this must be done in the node instance.  It
+    # could be done in host instance but host instance only outputs
+    # first line of warnings/errors.
+
+    if [ "$PARA_NPROCS" -gt 0 -a $HOST_ENABLED -eq 0 ] || [ "$PARA_NPROCS" -gt 0 -a $FLUX_MODE -eq 1 ]; then
+         parallel_resolve_comm
+    fi
+}
+#------------------------------------------------------------------------------
+# searches a list of arguments (in the from "opt1=value1 opt2=value") for a
+# particular option and then returns the value of that option.  The value is
+# returned via standard out.  If the option is not found, then nothing is
+# returned.  The option may be of form "-token=value" or "--token=value".
+#  - inputs:
+#    arg #1 = list of arguments (should be quoted in the call)
+#    arg #2 = option sought (should include "--" or "-" but not "=") 
+#  - output: 
+#    return: 0 if found; non-zero otherwise
+#    stdout: value of option if found
+#
+utility_get_opt () {
+    err=0
+    my_arglist=$1
+    my_opt=$2
+
+    my_value=`echo $my_arglist | \
+        awk '{ for(i=1;i<=NF;i++) print $i}' | \
+        grep "^$my_opt=" | sed "s/$my_opt=//"`
+   
+    if [ -z "my_value" ]; then
+        err=1;
+    fi
+
+    echo $my_value
+    return $err
+}
+#------------------------------------------------------------------------------
+# checks and optionally resolves the interconnect and MPI
+#  - output/modified variables:
+#    PARA_INTERCONN  - interconnect/system type
+#    PARA_IC_VARIANT - interconnect variant
+#    PARA_MPI        - MPI
+#
+parallel_resolve_comm () {
+
+    # only execute this once for all instances of runscript
+
+    if [ -n "$PARA_HAS_RESOLVED_COMM" ] || [ $NODE_ENABLED -eq 1 -a \( "$FL_PLATFORM_ARCH" = "lop64" -o "$FL_PLATFORM_ARCH" = "lnarm64" \) ]; then
+        return
+    fi
+    PARA_HAS_RESOLVED_COMM=1; export PARA_HAS_RESOLVED_COMM
+
+    # split the -p option (argument may consist of 2 parts separated by a ".")
+
+    my_ic_input=$PARA_INTERCONN
+    PARA_INTERCONN=`echo $my_ic_input | awk -F. '{print $1}'`
+    PARA_IC_VARIANT=`echo $my_ic_input | awk -F. '{print $2}'`
+
+    PARA_MPI_VARIANT=`echo $PARA_MPI | awk -F. '{print $2}'`
+    PARA_MPI=`echo $PARA_MPI | awk -F. '{print $1}'`
+    if [ "$PARA_MPI" = "mvapich" -a -z "$PARA_MPI_VARIANT" ]; then
+        PARA_MPI_VARIANT=$PARA_IC_VARIANT
+    fi
+    export PARA_MPI_VARIANT
+
+    # temporary check
+
+    if [ "$PARA_INTERCONN" = "net" ]; then
+        printf "%s%s\n" "error: -pnet is obsolete fluent6.2 syntax; " \
+            "please use \"-peth -mpi=net\""
+    fi
+
+    # check for support and availability of the requested interconnect and
+    # MPI, potentially resolving the defaults (including the interconnect
+    # variant).
+
+    my_check_cmd="$PARA_MPORT_ROOT/mpi_wrapper/bin/mpicheck.fl"
+
+    if [ ! -f $my_check_cmd ]; then
+        printf "%s\n" "internal error: missing file $my_check_cmd"
+        printf "%s%s\n" "    please ensure multiport CVS is up to date " \
+            "(cvs update -d)"
+        exit 1
+    fi
+
+    my_opts=
+    test -n "$PARA_CHECK" && my_opts="$my_opts --check=$PARA_CHECK"
+
+    if [ $NODE_ENABLED -eq 1 ] && [ "$FL_PLATFORM_ARCH" = "lop64" -o "$FL_PLATFORM_ARCH" = "lnarm64" ]; then
+       FLUENT_ARCH=$FL_PLATFORM_ARCH
+    fi
+
+    my_check_output=`$my_check_cmd --arch=$FLUENT_ARCH \
+        --ic=$PARA_INTERCONN --ic_variant=$PARA_IC_VARIANT \
+        --rsh=$RSHELL --cnf=$PARA_CNF \
+        --mpi=$PARA_MPI \
+        $my_opts`
+    my_err=$?
+
+    #echo "return args=$my_check_output"  # temporary output for dev
+
+    if [ $my_err -ne 0 ]; then
+        # message should be output by mpicheck.fl
+        # exit 1
+        # we will regard this check as soft, and let FLUENT proceed
+        echo "*** Parallel system check failed!"
+        echo "*** To disable this check, run FLUENT with -pcheck=0"
+    fi
+
+    PARA_INTERCONN=`utility_get_opt "$my_check_output" --ic`
+    PARA_IC_VARIANT=`utility_get_opt "$my_check_output" --ic_variant`
+    PARA_MPI=`utility_get_opt "$my_check_output" --mpi`
+
+    # export output variables to other script instances (PARA_INTERCONN
+    # and PARA_MPI passed by arg list)
+
+    export PARA_IC_VARIANT
+}
+
+###End of ./run-scripts/parallel_setup###
+#------------------------------------------------------------------------------
+# $RCSfile: fluent_version,v $, $Date: 2009/04/09 06:20:38 $, $Revision: 1.3 $
+fluent_version () {
+	if [ $CORTEX_ENABLED -eq 0 -a "$PARA_NPROCS" -gt 0 -a $NODE_ENABLED -eq 0 ]; then
+  		HOST_ENABLED=1
+	fi
+	if [ $CORTEX_ENABLED -eq 0 ]; then
+		test -z "$VERSION" && list_versions "$usage";
+		if [ -z "$CX_SINGLE" ]; then
+			HOOPS_PICTURE=null/:0.0
+		fi
+	fi
+
+	FP=${FP}$CX_SINGLE
+
+	VERSION_DIR=$PROD_ARCH_DIR/$VERSION
+
+	FLUENT_PROD_DIR="$PROD_DIR"
+	export FLUENT_PROD_DIR
+	if [ -n "$FLUENT_ARCH_FL" ]; then
+		VERSION_DIR=$PROD_DIR/$FLUENT_ARCH_FL/$VERSION
+	fi
+		
+	if [ $HOST_ENABLED -eq 1 ]; then
+     		VERSION_DIR=$VERSION_DIR\_host
+	elif [ $NODE_ENABLED -eq 1 ]; then
+     		VERSION_DIR=$VERSION_DIR\_node
+
+           if [ -n "$FL_PLATFORM_ARCH" ]; then
+              VERSION_DIR=$PROD_PLATFORM_ARCH_DIR/$VERSION\_node
+           fi
+
+	fi
+
+	if [ $CORTEX_ENABLED -eq 1 -o -n "$CX_SINGLE" ]; then
+  		if [ "$VERSION" != "listen" ]; then
+			if [ -n "$CX_SINGLE" -o "$PARA_NPROCS" -lt 1 ]; then
+      				test -d "$VERSION_DIR" || \
+        			list_versions "Error: directory $VERSION_DIR does not exist."
+   	 		else
+      				test -d ""$VERSION_DIR"_host" || \
+          			list_versions "Error: directory "$VERSION_DIR"_host does not exist."
+    			fi
+		fi
+	fi
+
+	if [ $CORTEX_ENABLED -eq 0 ]; then
+		test -z "$VERSION" && list_versions "$usage";
+		if [ -z "$CX_SINGLE" ]; then
+			HOOPS_PICTURE=null/:0.0
+		fi
+	fi
+}
+
+###End of ./run-scripts/fluent_version###
+#------------------------------------------------------------------------------
+
+### Monitor_setup 
+Monitor_config() {
+    if [ -z "$FLMON_CONFIG_DIR" ]; then
+	FLMON_CONFIG_DIR=$HOME/.flmon
+    fi
+    if [ -f $FLMON_CONFIG_DIR/monitor.conf ]; then
+	    export FLMON_CONFIG_DIR
+    fi
+}
+
+###End of ./run-scripts/Monitor_Config###
+#------------------------------------------------------------------------------
+MPCCI_Check() {
+    oldargs=$*
+    newargs=
+    CCI=
+    TMPARG=
+    while [ $# -gt 0 ]; do
+        case $1 in
+            -p*)    ;;
+        esac
+        if [ $1 = "-cci_args" ]; then
+            CCI="-cci_start"
+            shift
+            newargs=$*
+            break
+        fi
+        TMPARG="$TMPARG -cci_$1"
+        shift
+   done
+   if [ -n "$CCI" ]; then
+    newargs="$newargs"
+    CCI="$CCI $TMPARG -cci_finish"
+    cmdargs=$newargs
+   fi
+
+    # check for MPCCI  
+
+    mpcci=
+    for my_arg in $oldargs
+    do
+        if [ "$my_arg" = "-mpcci" ]; then
+            mpcci=1
+            break
+        fi
+    done
+
+    # apply fixup for hpux if MPCCI is active
+    # (note: FLUENT_ARCH may not be available yet unless inherited from
+    # environment)
+
+    if [ -n "$mpcci" ]; then 
+     case $FLUENT_ARCH in
+         hpux11 | hpux11_64 )
+         LD_PRELOAD="libF90.sl:libcl.sl:libcps.sl:libpthread.sl"; export LD_PRELOAD
+         MP_NUMBER_OF_THREADS=1; export MP_NUMBER_OF_THREADS
+         ;;
+       esac
+
+     case $FLUENT_ARCH in
+         hpux11_ia64 )
+         LD_PRELOAD="libF90.so:libcl.so:libcps.so:libpthread.so"; export LD_PRELOAD
+         MP_NUMBER_OF_THREADS=1; export MP_NUMBER_OF_THREADS
+         ;;
+       esac
+    fi
+}
+
+###End of ./run-scripts/MPCCI_Check###
+#------------------------------------------------------------------------------
+LoadManager_Check_and_Launch () {
+
+PARA_MPORT_ROOT="$PROD_DIR/multiport"
+
+lmrun="$PARA_MPORT_ROOT/mpi_wrapper/bin/loadmanager.fl"
+
+my_lmout=`$lmrun -prod=$RUN_SCRIPT -path=$FLUENT_INC -flpath_pbs=$cmd $cmdargs`
+
+lmerr=$?
+
+if [ $lmerr -ne 0 ]; then
+   echo "Error: Failed to start Fluent under loadmanager."
+   exit 1
+fi
+
+for i in ${my_lmout}; do
+        case $i in
+                -PARA_CNF=*)    PARA_CNF=`echo $i | sed 's/-PARA_CNF=//'`;;
+                -PARA_NPROCS=*) PARA_NPROCS=`echo $i | sed 's/-PARA_NPROCS=//'`;;
+                -SGE_EXIT=*)    SGE_EXIT=`echo $i | sed 's/-SGE_EXIT=//'`;;
+                -SGE_CKPT_DIR=*)SGE_CKPT_DIR=`echo $i | sed 's/-SGE_CKPT_DIR=//'`; export SGE_CKPT_DIR;;
+                -PBS_EXIT=*)    PBS_EXIT=`echo $i | sed 's/-PBS_EXIT=//'`;;
+                -LSF_PAM=*)     LSF_PAM=`echo $i | sed 's/-LSF_PAM=//'`;;
+                -JOURNAL=*)     JOURNAL=`echo $i | sed 's/-JOURNAL=//'`;;
+                -FLUENT_LSF_PATH=*)  FLUENT_LSF_PATH=`echo $i | sed 's/-FLUENT_LSF_PATH=//'`;;
+                -LM_PBS_ARGS=*)LM_PBS_ARGS=`echo $i | sed 's/PLF+/ /g' | sed 's/-LM_PBS_ARGS=//'`; export LM_PBS_ARGS;;
+        esac
+done
+
+
+if [ $SGE_EXIT -eq 1 -o $PBS_EXIT -eq 1 ] ; then
+  exit 0
+fi
+
+}
+
+###End of ./run-scripts/LoadManager_Check_and_Launch###
+#------------------------------------------------------------------------------
+# $RCSfile: host_to_node,v $, $Date: 2009/04/09 06:20:38 $, $Revision: 1.9 $
+host_to_node () {
+        test -n "$FLUX_MODE" && PASS_NODE_FLAGS="$PASS_NODE_FLAGS -flux"
+	test "$PARA_NPROCS" -gt 0 && PASS_NODE_FLAGS="$PASS_NODE_FLAGS -node"
+	test -n "$PARA_ARCH" && PASS_NODE_FLAGS="$PASS_NODE_FLAGS -a$PARA_ARCH"
+	test -n "$FLUENT_ARCH_FL" && PASS_NODE_FLAGS="$PASS_NODE_FLAGS -fla$FLUENT_ARCH_FL"
+	test -n "$PARA_RELEASE" && PASS_NODE_FLAGS="$PASS_NODE_FLAGS -r$PARA_RELEASE"
+	test -n "$PARA_NPROCS" && PASS_NODE_FLAGS="$PASS_NODE_FLAGS -t$PARA_NPROCS"
+	test -n "$PARA_INTERCONN" && PASS_NODE_FLAGS="$PASS_NODE_FLAGS -p$PARA_INTERCONN"
+	test -n "$PARA_MPI" && PASS_NODE_FLAGS="$PASS_NODE_FLAGS -mpi=$PARA_MPI"
+	test -n "$PARA_CNF" && PASS_NODE_FLAGS="$PASS_NODE_FLAGS -cnf=$PARA_CNF"
+	test -n "$FJMEM" && PASS_NODE_FLAGS="$PASS_NODE_FLAGS -fjmem=$FJMEM"
+	test -n "$PARA_PART" && PASS_NODE_FLAGS="$PASS_NODE_FLAGS -part$PARA_PART"
+	test -n "$FLUENT_INC_PATH" && PASS_NODE_FLAGS="$PASS_NODE_FLAGS " #-path$FLUENT_INC_PATH"
+        if [  "$FL_PLATFORM_ARCH" = "lop64" ]; then
+           test -n "$FL_PLATFORM_ARCH" && PASS_NODE_FLAGS="$PASS_NODE_FLAGS -platform=power -alnamd64"
+        elif [  "$FL_PLATFORM_ARCH" = "lnarm64" ]; then
+           test -n "$FL_PLATFORM_ARCH" && PASS_NODE_FLAGS="$PASS_NODE_FLAGS -platform=arm -alnamd64"
+        fi
+	test -n "$PARA_MPIRUN_FLAGS" && PASS_NODE_FLAGS="$PASS_NODE_FLAGS -mpiopt=$PARA_MPIRUN_FLAGS"
+	test -n "$PARA_MPIRUN_COMMAND" && PASS_NODE_FLAGS="$PASS_NODE_FLAGS -mpirun=$PARA_MPIRUN_COMMAND"
+	test -n "$FLUENT_LSF_PATH" && PASS_NODE_FLAGS="$PASS_NODE_FLAGS -lsfpath$FLUENT_LSF_PATH"
+	test -n "$LSF_OPTIONS" && PASS_NODE_FLAGS="$PASS_NODE_FLAGS -lsfopt=$LSF_OPTIONS"
+  
+	if [ $LSF_ENABLED -eq 1 ]; then
+		PASS_NODE_FLAGS="$PASS_NODE_FLAGS -lsf"
+	fi
+	#if [ $SGE_ENABLED -eq 1 ]; then
+	#	PASS_NODE_FLAGS="$PASS_NODE_FLAGS -sge"
+	#fi
+	if [ $SGI_DPLACE -eq 0 ]; then
+		PASS_NODE_FLAGS="$PASS_NODE_FLAGS -nodplace"
+	fi
+        if [ $SSH_SPAWN -eq 1 ]; then
+		PASS_NODE_FLAGS="$PASS_NODE_FLAGS -ssh"
+	fi
+
+	if [ $MPCCI_ENABLED -eq 1 ]; then
+	   PASS_NODE_FLAGS="$PASS_NODE_FLAGS -mpcci $CCI_FLAGS"
+	fi
+
+  if [ $MTRACE -eq 1 ]; then
+    PASS_NODE_FLAGS="$PASS_NODE_FLAGS mtrace"
+  elif [ $MTRACE1 -eq 1 ]; then
+    PASS_NODE_FLAGS="$PASS_NODE_FLAGS mtrace1"
+  fi
+
+	test -z "$HOST_FUNCTION" && HOST_FUNCTION="(list (rpsetvar (QUOTE parallel/function) \"$FLUENT_PROD $VERSION $PASS_PROD_FLAGS $PASS_NODE_FLAGS\") (rpsetvar (QUOTE parallel/rhost) \"$PARA_LOADHOST\") (rpsetvar (QUOTE parallel/ruser) \"\") (rpsetvar (QUOTE parallel/nprocs_string) \"$PARA_NPROCS\") (rpsetvar (QUOTE parallel/auto-spawn?) $PARA_AUTO_SPAWN) (rpsetvar (QUOTE parallel/trace-level) $PARA_TRACE) (rpsetvar (QUOTE parallel/remote-shell) $SSH_SPAWN) (rpsetvar (QUOTE parallel/path) \"$FLUENT_INC_PATH\") (rpsetvar (QUOTE parallel/hostsfile) \"$PARA_CNF\") )"
+
+}
+
+###End of ./run-scripts/host_to_node###
+#------------------------------------------------------------------------------
+# $Id: isat_lib,v 1.4 2006/05/12 15:34:02 pj Exp $
+isat_lib ()
+{
+    case $FLUENT_ARCH in
+        # since 2006.03.03, isat for hpux11_64 has been dynamically linked
+        # with F90 so the below fixup code should no longer be needed for
+        # hpux11_64; hpux11 still needs it.
+        hpux11 | hpux11_64 )
+            case $VERSION in
+                [2-3]ddp )
+                     LD_PRELOAD="$LD_PRELOAD:$PROD_DIR/isat/$FLUENT_ARCH/dp/lib_isat.so"; export LD_PRELOAD
+                     ;;
+                [2-3]d )
+                     LD_PRELOAD="$LD_PRELOAD:$PROD_DIR/isat/$FLUENT_ARCH/sp/lib_isat.so"; export LD_PRELOAD
+                     ;;
+            esac
+            MP_NUMBER_OF_THREADS=1; export MP_NUMBER_OF_THREADS
+            ;;
+        # hpux11_ia64 no longer needs to preload fortran libraries; fortran
+        # libaries are now linked into executable to force load order on
+        # HP-UX (CR 45195)
+        #hpux11_ia64 )
+    esac
+}
+#------------------------------------------------------------------------------
+kinetics_lib ()
+{
+    # set library path to pick up specific fortran lib; the kinetics library
+    # is compiled with TLS fortran 90 library in /usr/lib/pa2.0.  If this
+    # specific library isn't initially loaded by fluent, it is loaded when
+    # the kinetics library is dynamically loaded, causing TLS errors.
+
+    case $FLUENT_ARCH in
+        hpux11)
+            sys_prepend_ld_library_path /usr/lib/pa2.0
+            ;;
+    esac
+}
+
+###End of ./run-scripts/isat_lib###
+#------------------------------------------------------------------------------
+addons_lib ()
+{
+	if [ -z "$FLUENT_ADDONS" ]; then
+                FLUENT_ADDONS=$FLUENT_PROD_DIR/addons
+		export FLUENT_ADDONS
+	fi 
+        sys_prepend_ld_library_path $FLUENT_PROD_DIR/addons/adjoint/$FLUENT_ARCH/$VERSION
+
+        if [ $CORBA_LIB -eq 1 ]; then
+            sys_prepend_ld_library_path \
+                $FLUENT_PROD_DIR/../../commonfiles/AAS/bin/linx64
+        fi
+    sys_prepend_ld_library_path $FLUENT_PROD_DIR/PRIME/FM/Dependencies/ACIS/linux_a64/code/bin
+    sys_prepend_ld_library_path $FLUENT_PROD_DIR/PRIME/Packages/PRIME_Fluent/$FLUENT_ARCH/${VERSION}_node
+}
+
+###End of ./run-scripts/addons_lib###
+#------------------------------------------------------------------------------
+# $RCSfile: acoustic_lib,v $
+acoustic_lib ()
+{
+    if [ $MAJOR_RELEASE -eq 6 -a $MINOR_RELEASE -le 2 ]; then
+        if [ -z "$FLUENT_GTIHOME" ]; then
+          FLUENT_GTIHOME=$FLUENT_INC/coupling/GTpower
+	  export FLUENT_GTIHOME
+        fi
+	if [ -z "$FLUENT_GTIVERSION" ]; then
+	  FLUENT_GTIVERSION=v6.1.0
+	  export FLUENT_GTIVERSION
+        fi
+	if [ -z "$FLUENT_WAVELIB" ]; then
+                FLUENT_WAVELIB=$FLUENT_INC/coupling/WAVE/lib
+	        export FLUENT_WAVELIB
+	fi 
+    else
+        if [ -z "$FLUENT_GTIHOME" ]; then
+                FLUENT_GTIHOME=$FLUENT_PROD_DIR/gtpower
+                export FLUENT_GTIHOME
+        fi
+
+	if [ -z "$FLUENT_WAVELIB" ]; then
+                FLUENT_WAVELIB=$FLUENT_PROD_DIR/wave
+	        export FLUENT_WAVELIB
+	fi 
+    fi
+
+    if [ -z "$FLUENT_ACOUSTICS_SET" ]; then
+        # set and export flag just so other instances of scripts don't continue
+        # to add to library path; some arches have limitation on length
+        # 
+        FLUENT_ACOUSTICS_SET=1; export FLUENT_ACOUSTICS_SET
+
+	LD_LIBRARY_PATH=${LD_LIBRARY_PATH}:$FLUENT_WAVELIB/$FLUENT_ARCH:$PROD_DIR/KINetics/$FLUENT_ARCH
+	export LD_LIBRARY_PATH
+	case $FLUENT_ARCH in
+                aix*) 
+                        LIBPATH="$LIBPATH:$FLUENT_WAVELIB/$FLUENT_ARCH:$PROD_DIR/KINetics/$FLUENT_ARCH"; 
+                        export LIBPATH 
+                        ;; 
+		hpux*)
+			SHLIB_PATH="$SHLIB_PATH:$FLUENT_WAVELIB/$FLUENT_ARCH";
+                	export SHLIB_PATH
+			;;
+		irix*)
+			LD_LIBRARYN32_PATH="$LD_LIBRARYN32_PATH:$FLUENT_WAVELIB/$FLUENT_ARCH:$PROD_DIR/KINetics/$FLUENT_ARCH";
+    			export LD_LIBRARYN32_PATH
+    			;;    
+		lnia64)
+			LD_LIBRARY_PATH=${LD_LIBRARY_PATH}:$FLUENT_WAVELIB/$FLUENT_ARCH/syslib:$PROD_DIR/KINetics/$FLUENT_ARCH
+			export LD_LIBRARY_PATH
+			;;
+                power*) 
+                        LIBPATH="$LIBPATH:$FLUENT_WAVELIB/$FLUENT_ARCH:$PROD_DIR/KINetics/$FLUENT_ARCH"; 
+                        export LIBPATH 
+                        ;; 
+			
+	esac
+    fi
+}
+
+###End of ./run-scripts/acoustic_lib###
+#------------------------------------------------------------------------------
+
+# $RCSfile: cpropep_lib,v $
+cpropep_lib ()
+{
+    if [ -z "$FLUENT_CPROPEP_SET" ]; then
+        # set and export flag just so other instances of scripts don't continue
+        # to add to library path; some arches have limitation on length
+        # 
+        FLUENT_CPROPEP_SET=1; export FLUENT_CPROPEP_SET
+
+	LD_LIBRARY_PATH=${LD_LIBRARY_PATH}:$PROD_DIR/cpropep/$FLUENT_ARCH
+	export LD_LIBRARY_PATH
+	case $FLUENT_ARCH in
+                aix*) 
+                        LIBPATH="$LIBPATH:$PROD_DIR/cpropep/$FLUENT_ARCH"; 
+                        export LIBPATH 
+                        ;; 
+		hpux*)
+			SHLIB_PATH="$SHLIB_PATH:$PROD_DIR/cpropep/$FLUENT_ARCH";
+                	export SHLIB_PATH
+			;;
+		irix*)
+			LD_LIBRARYN32_PATH="$LD_LIBRARYN32_PATH:$PROD_DIR/cpropep/$FLUENT_ARCH";
+    			export LD_LIBRARYN32_PATH
+    			;;    
+                power*) 
+                        LIBPATH="$LIBPATH:$PROD_DIR/cpropep/$FLUENT_ARCH"; 
+                        export LIBPATH 
+                        ;; 
+			
+	esac
+    fi
+}
+
+###End of ./run-scripts/cpropep_lib###
+#------------------------------------------------------------------------------
+# $RCSfile: fsi_lib,v $
+fsi_lib ()
+{
+	if [ $MAJOR_RELEASE -eq 6 -a $MINOR_RELEASE -le 3 ]; then
+		if [ -z "$FLUENT_FSI" ]; then
+        	        FLUENT_FSI=$FLUENT_INC/${FLUENT_PROD}${RELEASE}/fsi
+		        export FLUENT_FSI
+		fi 
+	fi
+
+}
+
+###End of ./run-scripts/fsi_lib###
+#------------------------------------------------------------------------------
+# $RCSfile: vki_lib,v $
+vki_lib ()
+{
+  if [ -z "$FLUENT_VKI_LIB" ]; then
+   FLUENT_VKI_LIB=$FLUENT_INC/${FLUENT_PROD}${RELEASE}/vki
+    export FLUENT_VKI_LIB
+    fi 
+
+    if [ -z "$FLUENT_VKI_SET" ]; then
+# set and export flag just so other instances of scripts don't continue
+# to add to library path; some arches have limitation on length
+# 
+     FLUENT_VKI_SET=1; export FLUENT_VKI_SET
+      if [ "$FLUENT_ARCH" = "lnamd64" -o "$FLUENT_ARCH" = "lnx86" -o "$FLUENT_ARCH" = "hpux11_ia64" -o "$FLUENT_ARCH" = "lnia64" ]; then
+       VKI_ODB_PATH=libodb2019; export VKI_ODB_PATH
+      else 
+       VKI_ODB_PATH=libodb672; export VKI_ODB_PATH  
+      fi
+
+        if [ "$FLUENT_ARCH" = "hpux11_ia64" ]; then
+         LD_PRELOAD="$LD_PRELOAD:libcps.so:libpthread.so";
+  export LD_PRELOAD
+   fi
+   LD_LIBRARY_PATH="$FLUENT_VKI_LIB/$FLUENT_ARCH:$FLUENT_VKI_LIB/$FLUENT_ARCH/$VKI_ODB_PATH:${LD_LIBRARY_PATH}"; 
+  case $FLUENT_ARCH in
+   aix*) 
+   LIBPATH="$LIBPATH:$FLUENT_VKI_LIB/$FLUENT_ARCH:$FLUENT_VKI_LIB/$FLUENT_ARCH/$VKI_ODB_PATH"; 
+  export LIBPATH 
+   ;; 
+  hpux*)
+   SHLIB_PATH="$SHLIBPATH:$FLUENT_VKI_LIB/$FLUENT_ARCH:$FLUENT_VKI_LIB/$FLUENT_ARCH/$VKI_ODB_PATH"; 
+  export SHLIB_PATH
+   ;;
+  irix*)
+   LD_LIBRARYN32_PATH="$LD_LIBRARYN32_PATH:$FLUENT_VKI_LIB/$FLUENT_ARCH:$FLUENT_VKI_LIB/$FLUENT_ARCH/$VKI_ODB_PATH"; 
+  export LD_LIBRARYN32_PATH
+   ;;    
+  power*) 
+   LIBPATH="$LIBPATH:$FLUENT_VKI_LIB/$FLUENT_ARCH:$FLUENT_VKI_LIB/$FLUENT_ARCH/$VKI_ODB_PATH"; 
+  export LIBPATH 
+   ;; 
+
+  esac
+   fi
+}
+
+###End of ./run-scripts/vki_lib###
+#------------------------------------------------------------------------------
+# $RCSfile: cortex_app_shared_library,v $, $Date: 2008/06/10 22:04:33 $, $Revision: 1.30 $
+cortex_app_shared_library () {
+case $FLUENT_ARCH in
+	aix*)
+                LIBPATH="$FLUENT_LIBRARY_PATH:$LIBPATH:/usr/lib:$FLUENT_INC/lib/$FLUENT_ARCH";
+                export LIBPATH;
+                LD_LIBRARY_PATH="$LD_LIBRARY_PATH:$LIBPATH:."
+                export LD_LIBRARY_PATH;;
+  	alpha*)
+    		LD_LIBRARY_PATH="$FLUENT_LIBRARY_PATH:$LD_LIBRARY_PATH:/usr/shlib"
+    		LD_LIBRARY_PATH="$LD_LIBRARY_PATH:$FLUENT_INC/lib/$FLUENT_ARCH:.";
+    		export LD_LIBRARY_PATH;;
+  	dec*)
+                LD_LIBRARY_PATH="$FLUENT_LIBRARY_PATH:$LD_LIBRARY_PATH:/usr/shlib"
+                LD_LIBRARY_PATH="$LD_LIBRARY_PATH:$FLUENT_INC/lib/$FLUENT_ARCH:.";
+                export LD_LIBRARY_PATH;;
+	fujitsu_pp)
+                #nls path
+		if [ -z "$XNLSPATH" -a ! -d /usr/lib/X11/nls ]; then
+			XNLSPATH="$FLUENT_INC/lib/nls";
+			export XNLSPATH;
+		fi;
+                if [ $GUI_ENABLED -eq 1 ]; then
+			LD_LIBRARY_PATH="$FLUENT_LIBRARY_PATH:$LD_LIBRARY_PATH:/usr/lib";
+		else
+                               LD_LIBRARY_PATH="$FLUENT_LIBRARY_PATH:.";
+		fi;
+                   	LD_LIBRARY_PATH="$LD_LIBRARY_PATH:/usr/ucblib:/usr/ucblib/sparcv9";
+		#   for libXext.so
+		LD_LIBRARY_PATH="$LD_LIBRARY_PATH:/usr/openwin/lib";
+		LD_LIBRARY_PATH="/opt/FSUNf90/lib/sparcv9:/opt/FJSVmpi2/lib/sparcv9:/opt/FSUNaprun/lib/sparcv9:$LD_LIBRARY_PATH"
+		#   for fluent syslib
+	 	LD_LIBRARY_PATH="$FLUENT_LIBRARY_PATH:$PROD_ARCH_DIR/syslib:$LD_LIBRARY_PATH"
+
+		LD_LIBRARY_PATH="$LD_LIBRARY_PATH:$FLUENT_INC/lib/$FLUENT_ARCH:.";
+		LD_LIBRARY_PATH="/opt/SUNWspro/lib:$LD_LIBRARY_PATH";
+	 	export LD_LIBRARY_PATH
+		LD_LIBRARY_PATH_64=$LD_LIBRARY_PATH
+		export LD_LIBRARY_PATH_64
+		;;
+	hp700)
+    		SHLIB_PATH="$SHLIB_PATH:/usr/lib:/opt/graphics/common/lib:/opt/graphics/OpenGL/lib:$FLUENT_LIBRARY_PATH";
+    		SHLIB_PATH="$SHLIB_PATH:$FLUENT_INC/lib/$FLUENT_ARCH:.";
+    		export SHLIB_PATH
+    		# force ansi-mode for fluent5 udf cpp
+    		CCOPTS="-Aa"; export CCOPTS
+    		;;
+	hpux*)
+                SHLIB_PATH="$SHLIB_PATH:/usr/lib:/opt/graphics/common/lib:/opt/graphics/OpenGL/lib:$FLUENT_LIBRARY_PATH";
+                SHLIB_PATH="$SHLIB_PATH:$FLUENT_INC/lib/$FLUENT_ARCH:.";
+                export SHLIB_PATH
+                # force ansi-mode for fluent5 udf cpp
+                CCOPTS="-Aa"; export CCOPTS
+                ;;
+	irix*) 
+    		LD_LIBRARY_PATH="$LD_LIBRARY_PATH:$FLUENT_LIBRARY_PATH:$FLUENT_INC/lib/$FLUENT_ARCH:.";
+    		export LD_LIBRARY_PATH
+
+		LD_LIBRARYN32_PATH="$LD_LIBRARYN32_PATH:$FLUENT_INC/lib/$FLUENT_ARCH";
+    		export LD_LIBRARYN32_PATH
+    		;;    
+	lnx86* | lnia64 | lnamd64 | linmic)
+                PYTHONHOME="$FLUENT_INC/../commonfiles/CPython/3_7/linx64/Release/python"
+                if [ ! -d "$PYTHONHOME" ]; then
+                   PYTHONHOME="$FLUENT_INC/../FBU_Dependencies/thirdparty/cpython3/linx64"
+                fi
+                export PYTHONHOME
+                QT_LIB="$FLUENT_INC/lib/$FLUENT_ARCH/Qt/lib"
+                if [ ! -d "$FLUENT_INC/lib/$FLUENT_ARCH/Qt/lib" ]; then
+                   QT_LIB="$FLUENT_INC/../FBU_Dependencies/thirdparty/qt/linx64/lib"
+                fi
+
+                sys_prepend_ld_library_path $QT_LIB
+                sys_prepend_ld_library_path $PYTHONHOME/lib
+                sys_append_ld_library_path $FLUENT_INC/lib/$FLUENT_ARCH
+                sys_append_ld_library_path .
+                sys_prepend_ld_library_path $PROD_DIR/cortex/$FLUENT_ARCH
+                sys_prepend_ld_library_path $FLUENT_INC/../tp/IntelMKL/2019.3.199/linx64/lib/intel64
+                sys_prepend_ld_library_path $FLUENT_INC/../tp/IntelCompiler/2019.3.199/linx64/lib/intel64
+                sys_prepend_ld_library_path $PROD_ARCH_DIR/syslib
+                sys_append_ld_library_path $FLUENT_INC/../commonfiles/Tcl/lib/linx64
+
+                if [ $NODE_ENABLED -eq 1 ] && [ "$FL_PLATFORM_ARCH" = "lop64" -o "$FL_PLATFORM_ARCH" = "lnarm64" ]; then
+                   sys_prepend_ld_library_path $FLUENT_INC/lib/$FL_PLATFORM_ARCH
+                   PYTHONHOME="$FLUENT_INC/../commonfiles/CPython/3_7/$FL_PLATFORM_ARCH/Release/python"
+                   if [ ! -d "$PYTHONHOME" ]; then
+                     PYTHONHOME="$FLUENT_INC/../FBU_Dependencies/thirdparty/cpython3/$FL_PLATFORM_ARCH"
+                   fi
+                   sys_prepend_ld_library_path $PYTHONHOME/lib
+                   export PYTHONHOME
+                fi
+
+                if [ $FLUENT_ARCH = lnia64 ]; then
+                    sys_append_ld_library_path $FLUENT_INC/../commonfiles/Tcl/lib/linia64
+                fi
+                if [ $FLUENT_ARCH = lnx86 ]; then
+                    sys_append_ld_library_path $FLUENT_INC/../commonfiles/Tcl/lib/linia32
+                fi
+		if [ -z "$AFD_ROOT" ]; then
+		    cortex_exe=`ls -t $PROD_DIR/cortex/$FLUENT_ARCH/cortex.*.*.* | tr ' ' '\012' | head -n 1`
+		fi
+		if [ -x "$cortex_exe" ]; then
+			hoops_version=`ldd $cortex_exe | grep hoops | awk -F. '{print $1}' | sed -e 's|libhoops||g' -e 's|\s*||g'`
+		fi
+		if [ -n "$hoops_version" ]; then
+			if [ $hoops_version -lt 1200 ]; then
+				if [ -f /etc/issue -o -f /etc/issue.net ]; then
+					if [ `grep -i "SuSE Linux 9" /etc/issue* | wc -l` != 0 ]; then
+                                                sys_prepend_ld_library_path /lib:/usr/lib/GL
+					fi
+				fi
+			fi
+		fi
+                if [ -d /lib/i686 ]; then
+                        sys_prepend_ld_library_path /lib/i686
+                fi
+                export LD_LIBRARY_PATH ;;
+
+	
+	power*)
+                LIBPATH="$FLUENT_LIBRARY_PATH:$LIBPATH:/usr/lib:$FLUENT_INC/lib/$FLUENT_ARCH";
+                export LIBPATH;
+                LD_LIBRARY_PATH="$LD_LIBRARY_PATH:$LIBPATH:."
+                export LD_LIBRARY_PATH;;
+	
+  	rs6000)
+    		LIBPATH="$FLUENT_LIBRARY_PATH:$LIBPATH:/usr/lib:$FLUENT_INC/lib/$FLUENT_ARCH";
+    		export LIBPATH;
+    		LD_LIBRARY_PATH="$LD_LIBRARY_PATH:$LIBPATH:."
+    		export LD_LIBRARY_PATH;;
+	sppux*)
+                SHLIB_PATH="$SHLIB_PATH:/usr/lib:/opt/graphics/common/lib:/opt/graphics/OpenGL/lib:$FLUENT_LIBRARY_PATH";
+                SHLIB_PATH="$SHLIB_PATH:$FLUENT_INC/lib/$FLUENT_ARCH:.";
+                export SHLIB_PATH
+                # force ansi-mode for fluent5 udf cpp
+                CCOPTS="-Aa"; export CCOPTS
+                ;;
+  	
+  	sol24s64 )
+		# nls path
+		if [ -z "$XNLSPATH" -a ! -d /usr/lib/X11/nls ]; then
+      			XNLSPATH="$FLUENT_INC/lib/nls";
+      			export XNLSPATH;
+    		fi;
+    		
+		if [ $GUI_ENABLED -eq 1 ]; then
+      			LD_LIBRARY_PATH="$FLUENT_LIBRARY_PATH:$LD_LIBRARY_PATH:/usr/lib";
+#      			LD_LIBRARY_PATH="$LD_LIBRARY_PATH:/opt/SUNWits/Graphics-sw/xgl/lib";
+    		else
+      			if [ $FLUENT_ARCH = ultra_64 ]; then
+        			LD_LIBRARY_PATH="$FLUENT_LIBRARY_PATH:.:$LD_LIBRARY_PATH";
+      			else
+        			LD_LIBRARY_PATH="$FLUENT_LIBRARY_PATH:/usr/lib:$LD_LIBRARY_PATH";
+      			fi;
+    		fi;
+
+    		if [ $FLUENT_ARCH = ultra_64 ]; then
+      			LD_LIBRARY_PATH="$LD_LIBRARY_PATH:/usr/ucblib:/usr/ucblib/sparcv9";
+    		fi;
+		#   for libXext.so
+    		LD_LIBRARY_PATH="$LD_LIBRARY_PATH:/usr/openwin/lib";
+		LD_LIBRARY_PATH="$LD_LIBRARY_PATH:$FLUENT_INC/lib/$FLUENT_ARCH:.";
+    		export LD_LIBRARY_PATH;;
+	solaris)
+                # nls path
+                if [ -z "$XNLSPATH" -a ! -d /usr/lib/X11/nls ]; then
+                        XNLSPATH="$FLUENT_INC/lib/nls";
+                        export XNLSPATH;
+                fi;
+
+                if [ $GUI_ENABLED -eq 1 ]; then
+                        LD_LIBRARY_PATH="$FLUENT_LIBRARY_PATH:$LD_LIBRARY_PATH:/usr/lib";
+#                        LD_LIBRARY_PATH="$LD_LIBRARY_PATH:/opt/SUNWits/Graphics-sw/xgl/lib";
+                else
+                        if [ $FLUENT_ARCH = ultra_64 ]; then
+                                LD_LIBRARY_PATH="$FLUENT_LIBRARY_PATH:.:$LD_LIBRARY_PATH";
+                        else
+                                LD_LIBRARY_PATH="$FLUENT_LIBRARY_PATH:/usr/lib:$LD_LIBRARY_PATH";
+                        fi;
+                fi;
+
+                if [ $FLUENT_ARCH = ultra_64 ]; then
+                        LD_LIBRARY_PATH="$LD_LIBRARY_PATH:/usr/ucblib:/usr/ucblib/sparcv9";
+                fi;
+                #   for libXext.so
+                LD_LIBRARY_PATH="$LD_LIBRARY_PATH:/usr/openwin/lib"; 
+                LD_LIBRARY_PATH="$LD_LIBRARY_PATH:$FLUENT_INC/lib/$FLUENT_ARCH:.";
+                export LD_LIBRARY_PATH;;
+
+	ultra*)
+                # nls path
+                if [ -z "$XNLSPATH" -a ! -d /usr/lib/X11/nls ]; then
+                        XNLSPATH="$FLUENT_INC/lib/nls";
+                        export XNLSPATH;
+                fi;
+
+                if [ $GUI_ENABLED -eq 1 ]; then
+                        LD_LIBRARY_PATH="$FLUENT_LIBRARY_PATH:$LD_LIBRARY_PATH:/usr/lib";
+#                        LD_LIBRARY_PATH="$LD_LIBRARY_PATH:/opt/SUNWits/Graphics-sw/xgl/lib";
+                else
+                        if [ $FLUENT_ARCH = ultra_64 ]; then
+                                LD_LIBRARY_PATH="$FLUENT_LIBRARY_PATH:.:$LD_LIBRARY_PATH";
+                        else
+                                LD_LIBRARY_PATH="$FLUENT_LIBRARY_PATH:/usr/lib:$LD_LIBRARY_PATH";
+                        fi;
+                fi;
+
+                if [ $FLUENT_ARCH = ultra_64 ]; then
+                        LD_LIBRARY_PATH="$LD_LIBRARY_PATH:/usr/ucblib:/usr/ucblib/sparcv9";
+                fi;
+                #   for libXext.so
+                LD_LIBRARY_PATH="$LD_LIBRARY_PATH:/usr/openwin/lib";
+		#   for fluent syslib
+                LD_LIBRARY_PATH="$FLUENT_LIBRARY_PATH:$PROD_ARCH_DIR/syslib:$LD_LIBRARY_PATH"
+
+                LD_LIBRARY_PATH="$LD_LIBRARY_PATH:$FLUENT_INC/lib/$FLUENT_ARCH:.";
+		LD_LIBRARY_PATH="/opt/SUNWspro/lib:$LD_LIBRARY_PATH";
+                export LD_LIBRARY_PATH;;
+  	*)
+esac
+
+        AWP_ROOT=`cd "$FLUENT_INC/.." && pwd`
+        if [ -d "$AWP_ROOT/Framework" ]; then
+          ARCH=`ls "$AWP_ROOT/Framework/bin/"`
+          sys_append_ld_library_path $AWP_ROOT/Tools/mono/$ARCH/lib
+          sys_append_ld_library_path $AWP_ROOT/Framework/bin/$ARCH
+        fi
+
+# so dlopen will find shared libs in users directory
+if [ -z "$LD_LIBRARY_PATH" ]; then
+	LD_LIBRARY_PATH="."
+	export LD_LIBRARY_PATH
+else
+	LD_LIBRARY_PATH="$LD_LIBRARY_PATH:."
+	export LD_LIBRARY_PATH
+fi
+}
+
+###End of ../../bin/run-scripts/common/cortex_app_shared_library###
+#------------------------------------------------------------------------------
+# $RCSfile: cortex_app_display_driver,v $, $Date: 2010/09/16 07:05:11 $, $Revision: 1.15 $
+cortex_app_display_driver () {
+	if [ $CORTEX_ENABLED -eq 0 ]; then
+		if [ -z "$CX_SINGLE" ]; then
+			HOOPS_PICTURE=null/:0.0
+		fi
+	fi
+	
+	if [ -z "$DISPLAY" -a "$FLUENT_GUI" != "off" ]; then
+		echo "Warning:  DISPLAY environment variable is not set." 1>&2
+		echo "  Graphics and GUI will not operate correctly" 1>&2
+		echo "  without this being set properly." 1>&2
+		HOOPS_DRIVER=null
+	fi
+	
+## (1). If user has provided a graphics driver via "-driver" option, that should be given preference.
+## (2). If user has provided a graphics driver via HOOPS_PICTURE environment variable, that should be given the next preference.
+## (3). If the user has not provided a graphics driver or if the user specified
+##      graphics driver does not work, the graphics driver is chosen with the following priority "opengl" -> "X11" -> "null".
+## (4). A suitable warning message will be printed by cortex, if the user-specified driver could not be respected for any reason.
+## (5). FL_HOOPS_DRIVER: This environment varible is used to identify whether graphics driver option is given by user or Fluent application.
+##      FL_HOOPS_DRIVER = NULL -> graphics driver is set by Fluent user. 
+##      FL_HOOPS_DRIVER=opengl -> graphics driver set by Fluent application. In fture we need to change it from "opengl" to "3ddriver".
+
+		if [ -n "$HOOPS_DRIVER" ]; then
+			if [ "$HOOPS_DRIVER" = "null" ]; then
+				HOOPS_PICTURE=null/:0.0
+			else
+				if [ -n "$DISPLAY" ]; then
+					HOOPS_PICTURE=${HOOPS_DRIVER}/${DISPLAY}
+				fi
+			fi
+		else
+			if [ -z "$HOOPS_PICTURE" ]; then
+				HOOPS_DRIVER=opengl
+				HOOPS_PICTURE=${HOOPS_DRIVER}/${DISPLAY}
+				FL_HOOPS_DRIVER=${HOOPS_DRIVER} 
+				export FL_HOOPS_DRIVER
+			fi
+		fi
+
+	export HOOPS_PICTURE
+
+##
+##   Addition by  JOS  2004-04-27:
+##   According to a message from TechSoft, HOOPS up to v920
+##   suffers from a bug that makes it impossible to use
+##   double buffering with the opengl driver.
+##   (The message is quoted in some Clarify CRs, e.g. 25382, 21601...)
+##   --- Simple tests showed that HOOPS up to v1010 is affected, too!
+##   A workaround is to include the word "double-buffering"
+##   in the HOOPS_DRIVER_OPTIONS environment variable.
+##   As could be verified on a Linux system, double buffering
+##   becomes effective only if selected in the FLUENT/Tgrid/MixSim
+##   GUI, even if this environment variable setting is made.
+##   More comment by  JOS  2004-06-17:
+##   I submitted a support case to TechSoft, # 3532.
+##   I was told that setting the environment variable definitely
+##   does NOT (and will not) enforce double buffering -- it just
+##   switches it on initially, until the application (cortex)
+##   tells something different; and this fixes the problem.
+##
+	case $HOOPS_PICTURE in
+		opengl* | OpenGL* | OPENGL*)
+			if [ -z "$HOOPS_DRIVER_OPTIONS" ]; then
+				HOOPS_DRIVER_OPTIONS="double-buffering"
+				export HOOPS_DRIVER_OPTIONS
+			else
+				case "$HOOPS_DRIVER_OPTIONS" in
+					*"double-buffering"*) ;;
+					*) HOOPS_DRIVER_OPTIONS=$HOOPS_DRIVER_OPTIONS,"double-buffering"
+				esac
+				export HOOPS_DRIVER_OPTIONS
+			fi
+	esac
+
+	if [ -z "$HOOPS_DRIVER_OPTIONS" ]; then
+		HOOPS_DRIVER_OPTIONS="number of colors = 75"
+		export HOOPS_DRIVER_OPTIONS
+	else
+		case "$HOOPS_DRIVER_OPTIONS" in
+			*"number of colors"*) ;;
+			*) HOOPS_DRIVER_OPTIONS=$HOOPS_DRIVER_OPTIONS,"number of colors=75"
+		esac
+		export HOOPS_DRIVER_OPTIONS
+	fi
+	if [ -z "$HOOPS_FONT_DIR" ]; then
+		HOOPS_FONT_DIR="$FLUENT_INC/lib/fonts"
+		export HOOPS_FONT_DIR
+	fi
+	if [ -z "$HOOPS_FONT_DIRECTORY" ]; then
+		HOOPS_FONT_DIRECTORY="$FLUENT_INC/lib/fonts"
+		export HOOPS_FONT_DIRECTORY
+	fi
+	if [ -z "$HOOPS_TEXT_FONT" ]; then
+		HOOPS_TEXT_FONT="name=(sans serif,roman,Helvetica.pfa,AvantGarde.pfa)"
+		export HOOPS_TEXT_FONT
+	fi
+	HOOPS_APPLICATION="cortex"
+	export HOOPS_APPLICATION
+}
+
+###End of ../../bin/run-scripts/common/cortex_app_display_driver###
+#------------------------------------------------------------------------------
+# $Id: license_path,v 1.8 2005/11/02 22:13:25 ndc Exp $
+license_path () {
+    case $FLUENT_ARCH in
+	aix51_64)
+		if [ $MAJOR_RELEASE -gt 6 -o \
+			$MAJOR_RELEASE -eq 6 -a  $MINOR_RELEASE -gt 2 ]; then
+		    FLUENT_LICENSE_PATH=$FLUENT_INC/license/aix51;export FLUENT_LICENSE_PATH
+		else
+		    FLUENT_LICENSE_PATH=$FLUENT_INC/license/power3;export FLUENT_LICENSE_PATH
+		fi
+	    ;;
+	hpux11_64)
+	    FLUENT_LICENSE_PATH=$FLUENT_INC/license/hpux11;export FLUENT_LICENSE_PATH
+	    ;;
+	hpux11_ia64)
+	    FLUENT_LICENSE_PATH=$FLUENT_INC/license/hpux11;export FLUENT_LICENSE_PATH    
+            ;;
+	irix65_mips4_64)
+	    FLUENT_LICENSE_PATH=$FLUENT_INC/license/irix65_mips4;export FLUENT_LICENSE_PATH    
+            ;;
+	power3_64)
+	    FLUENT_LICENSE_PATH=$FLUENT_INC/license/power3;export FLUENT_LICENSE_PATH    
+            ;;
+	ultra_64)
+	    FLUENT_LICENSE_PATH=$FLUENT_INC/license/ultra;export FLUENT_LICENSE_PATH    
+	    ;;
+	fujitsu_pp)
+	    FLUENT_LICENSE_PATH=$FLUENT_INC/license/ultra;export FLUENT_LICENSE_PATH    
+	    ;;
+    esac
+}
+
+###End of ../../bin/run-scripts/common/license_path###
+#------------------------------------------------------------------------------
+# $RCSfile: parallel_fluent,v $, $Date: 2006/07/13 17:43:19 $, $Revision: 1.4 $
+parallel_fluent () {
+    if [ "$PARA_MPI" = "net" ]; then
+        FP=${FP}_net
+    else
+        FP=${FP}_mpi
+    fi
+}
+###End of ./run-scripts/parallel_fluent###
+#------------------------------------------------------------------------------
+# $RCSfile: version_release_executable,v $, $Date: 2007/09/10 08:17:07 $, $Revision: 1.12 $
+version_release_executable () {
+	case $FLUENT_ARCH in
+		lnx86*)
+			sort_flag="-g"
+			;;
+              ultra_64)
+                         if [ -x /usr/xpg4/bin/tail ]; then
+                          PATH="/usr/xpg4/bin:$PATH"; export PATH
+                         fi;;
+              ultra)
+                         if [ -x /usr/xpg4/bin/tail ]; then
+                          PATH="/usr/xpg4/bin:$PATH"; export PATH
+                         fi;;
+		     *)	sort_flag="-n"
+			;;
+	esac
+	if [ -z "$VERSION_RELEASE" ]; then
+		VERSION_RELEASE=`cd $VERSION_DIR; \
+		echo ${FP}.[0-9]* | tr ' ' '\012' \
+		| sed -e "s/${FP}\.//" \
+		| grep -v busy \
+		| sort $sort_flag -t. -k 3,3 \
+		| tail -n 1`
+	fi
+	EXE=$VERSION_DIR/${FP}.${VERSION_RELEASE}${EXE_POST}
+
+	if [ -f "$EXE" ]; then
+		:
+	else 
+		list_versions "Error: program $EXE does not exist."
+	fi
+	if [ -x "$EXE" ]; then
+		:
+	else
+		list_versions "Error: file $EXE is not executable."
+	fi
+}
+
+###End of ../../bin/run-scripts/common/version_release_executable###
+#------------------------------------------------------------------------------
+# $RCSfile: host_flags,v $, $Date: 2009/04/09 06:20:38 $, $Revision: 1.3 $
+host_flags () {
+	HOST_FLAGS="$HOST_FLAGS $LSF_FLAGS $CCI_FLAGS";
+	if [ $FLUX_MODE -eq 1 ]; then
+	    sys_append_ld_library_path $VERSION_DIR
+	fi
+	EXE_CMD="$FLUENT_HOST_PRE $EXE_CMD $HOST_FLAGS";
+
+	if [ -d "$PROD_DIR/../../commonfiles/CPython/3_7/linx64/Release/python" ]; then
+		PYTHONHOME="$PROD_DIR/../../commonfiles/CPython/3_7/linx64/Release/python"
+	else
+		PYTHONHOME="$PROD_DIR/../../FBU_Dependencies/thirdparty/cpython3/linx64"
+	fi
+	export PYTHONHOME
+
+  use_debug=""
+  if [[ $VERSION == *"_debug"* ]]; then
+      use_debug="/debug"
+  fi
+  sys_prepend_ld_library_path $PROD_DIR/addons/afd/$FLUENT_ARCH${use_debug}
+  sys_prepend_ld_library_path $PROD_DIR/addons/afd/$FLUENT_ARCH${use_debug}/${VERSION/_debug}_host
+  sys_prepend_ld_library_path $PROD_DIR/cortex/$FLUENT_ARCH
+  sys_append_ld_library_path $PROD_DIR/multiport/mpi_wrapper/$FLUENT_ARCH/stub
+}
+
+###End of ./run-scripts/host_flags###
+#------------------------------------------------------------------------------
+# $RCSfile: node_flags,v $, $Date: 2009/04/09 06:20:38 $, $Revision: 1.5 $
+node_flags () {
+		# Compute-node pre-settings
+		#
+                if [ $FLUX_MODE -eq 1 ]; then
+                    sys_append_ld_library_path $VERSION_DIR
+                fi
+
+                if [ $NODE_ENABLED -eq 1 ]; then
+                  if [ "$FL_PLATFORM_ARCH" = "lop64" -o "$FL_PLATFORM_ARCH" = "lnarm64" ]; then
+                    FLUENT_ARCH=$FL_PLATFORM_ARCH
+                  fi
+                fi
+
+                sys_prepend_ld_library_path "$PROD_DIR/multiport/$FLUENT_ARCH/mpi/shared"
+                sys_remove_ld_library_path "$PROD_DIR/multiport/$FLUENT_ARCH/net/shared"
+
+		if [ -n "$LSF_OPTIONS" ]; then
+			LSF_OPTIONS=`echo $LSF_OPTIONS | sed 's/PLF+/ /g'`
+		fi
+	
+		if [ -n "$FLUENT_LSF_OPTIONS" ]; then
+			LSF_OPTIONS=$FLUENT_LSF_OPTIONS
+		fi
+	
+		if [ -n "$PARA_MPIRUN_FLAGS" ]; then
+			PARA_MPIRUN_FLAGS=`echo $PARA_MPIRUN_FLAGS | sed 's/PLF+/ /g'`
+                        echo "***************"
+                        echo "*** Using MPIRUN Flags!"
+                        echo "*** MPIRUN_FLAGS=$PARA_MPIRUN_FLAGS"
+                        echo "***************"
+		elif [ -n "$FLUENT_MPIRUN_FLAGS" ]; then
+			PARA_MPIRUN_FLAGS=$FLUENT_MPIRUN_FLAGS
+		fi
+		if [ -n "$PARA_MPIRUN_COMMAND" ]; then
+      			PARA_MPIRUN_COMMAND=`echo $PARA_MPIRUN_COMMAND | sed 's/PLF+/ /g'`
+    		fi
+    		if [ -n "$FLUENT_MPIRUN_COMMAND" ]; then
+      			PARA_MPIRUN_COMMAND=$FLUENT_MPIRUN_COMMAND
+    		fi
+
+		if [ -n "$PARA_CNF" ]; then
+			PARA_CNF=`echo $PARA_CNF | sed 's/PLF+/ /g'`
+		fi
+
+		if [ -d "$PROD_DIR/../../commonfiles/CPython/3_7/linx64/Release/python" ]; then
+			PYTHONHOME="$PROD_DIR/../../commonfiles/CPython/3_7/linx64/Release/python"
+		else
+			PYTHONHOME="$PROD_DIR/../../FBU_Dependencies/thirdparty/cpython3/linx64"
+		fi
+		export PYTHONHOME
+
+    use_debug=""
+    if [[ $VERSION == *"_debug"* ]]; then
+        use_debug="/debug"
+    fi
+    sys_prepend_ld_library_path $PROD_DIR/addons/afd/$FLUENT_ARCH${use_debug}
+    sys_prepend_ld_library_path $PROD_DIR/addons/afd/$FLUENT_ARCH${use_debug}/${VERSION/_debug/}_node
+    sys_remove_ld_library_path  $PROD_DIR/addons/afd/$FLUENT_ARCH${use_debug}/${VERSION/_debug/}_host
+    sys_prepend_ld_library_path $PROD_DIR/cortex/$FLUENT_ARCH
+}
+
+###End of ./run-scripts/node_flags###
+#------------------------------------------------------------------------------
+
+para_config_cnf () {
+    CNF_INFO=
+    ncpu_counter=0
+    CNF_KEEP_COLON=0
+    CNF_CREATE_FILE=0
+    CNF_FILE=
+    while [ $# -gt 0 ]; do
+	case $1 in
+	    -keepcolon) CNF_KEEP_COLON=1;;
+	    -f)		CNF_FILE=$2;shift;;
+	esac
+	shift
+    done
+    if [ -n  "$PARA_CNF" ]; then
+	if [ -f "$PARA_CNF" ]; then
+                CNF_INFO=`cat $PARA_CNF | grep -v '^#'`
+	else
+                CNF_INFO=`echo $PARA_CNF | tr ',' ' '` 
+	fi
+	PARA_CNF=
+	nodetoadd=0
+                if [ $PARA_NPROCS -eq 0 ]; then
+                      for hostandcount in $CNF_INFO
+                      do
+			#ignore #ed lines
+			(echo $hostandcount | grep '^#') >/dev/null
+			if [ $? -eq 0 ]; then
+				continue
+			fi
+                            count=`echo $hostandcount | awk -F: '{print $2}'`
+                            if [ -z "$count" ]; then
+		                count=1
+                            fi
+                            PARA_NPROCS=`expr $PARA_NPROCS + $count`
+                      done
+                fi
+	while [ $ncpu_counter -lt $PARA_NPROCS ]; do
+	    for hostandcount in $CNF_INFO
+	    do
+                #ignore #ed lines
+                (echo $hostandcount  | grep '^#') >/dev/null
+                if [ $? -eq 0 ]; then
+                        continue
+                fi
+		host=`echo $hostandcount | awk -F: '{print $1}'`
+		count=`echo $hostandcount | awk -F: '{print $2}'`
+		nodetoadd=`expr $PARA_NPROCS - $ncpu_counter `
+		if [ -z "$count" ]; then
+		    count=1
+		fi
+		if [ $count -gt  $nodetoadd ]; then
+		    count=$nodetoadd
+		fi
+		if [ $nodetoadd -eq 0 ] ; then
+		    break;
+		fi
+		if [ $CNF_KEEP_COLON -eq 1 ]; then
+		    if [ -z "$PARA_CNF" ]; then
+			PARA_CNF="$host:$count"
+		    else
+			PARA_CNF="$PARA_CNF,$host:$count"
+		    fi
+		else
+		   i=0
+		   if  [  -z "$PARA_CNF" ];  then
+		   	PARA_CNF="$host"
+		    	i=`expr $i + 1`	    
+		   fi
+		   while [ $i -lt $count ]; do
+			PARA_CNF="$PARA_CNF,$host"
+			i=`expr $i + 1`
+		   done
+		fi
+	    	ncpu_counter=` expr $ncpu_counter + $count `	
+	    done
+	done
+	if [ -n "$CNF_FILE" ]; then
+	    ## Create a temp output file
+	    touch $CNF_FILE
+	    PARA_CNF=`echo $PARA_CNF | tr ',' ' '` 
+	    if [ -f $CNF_FILE ]; then
+		    for h in $PARA_CNF
+		    do 
+		        echo $h >> $CNF_FILE
+		    done
+		    PARA_CNF=`echo $CNF_FILE`
+      fi
+      ## Files listed in this variable will be deleted by Fluent after
+      ## all the nodes has been spawned
+      FL_TMP_FILES="$CNF_FILE,$FL_TMP_FILES"
+      export FL_TMP_FILES
+
+	fi
+ fi
+
+
+}
+
+###End of ../../bin/run-scripts/common/para_config_cnf###
+#------------------------------------------------------------------------------
+check_network_config () {
+        ## Check if all the machines in the host list is reachable
+        ## and passwordless login is available using rsh/ssh
+        if [ -z  "$FLUENT_CHECK_NETWORK" ]; then
+             FLUENT_CHECK_NETWORK=0
+        fi
+        if [ -n "$PARA_CNF" -a  "$FLUENT_CHECK_NETWORK" -eq 1 ]; then
+         host_list_tested=
+         OLD_PARA_CNF=$PARA_CNF
+         CNF_INFO=
+            para_config_cnf
+            CNF_INFO=`echo $PARA_CNF | tr ',' ' '` 
+            echo "Testing machine configuration ..."
+            for host in $CNF_INFO; do
+                host_list_tested="$host $host_list_tested"
+                $RSHELL  $host echo 'test' > /dev/null 2> /tmp/fl-test-$$ < /dev/null
+                if [ $? -eq 0 ]; then
+                rm -f /tmp/fl-test-$$
+
+                else
+                    echo "Error: Could not run \"$RSHELL\" test on $host"
+                    echo `cat /tmp/fl-test-$$`
+                    rm /tmp/fl-test-$$
+                    exit 1
+                fi
+                rm -f /tmp/fl-test-$$
+         done
+      fi
+      PARA_CNF=$OLD_PARA_CNF
+}
+
+check_ssh_config () {
+        ## Check if all the machines in the host list are reachable
+        ## and passwordless login is available using ssh
+        if [ -n "$PARA_CNF" -a -z "$FL_SSH_CONFIG_TESTED" ]; then
+#         host_list_tested=
+         OLD_PARA_CNF=$PARA_CNF
+         CNF_INFO=
+         para_config_cnf
+         CNF_INFO=`echo $PARA_CNF | tr ',' ' '`
+         temp_host=
+         for host in $CNF_INFO; do
+             if [ -z "$temp_host" ]; then
+                temp_host=$host
+             else
+               if [ "$temp_host" = "$host" ]; then
+                  continue
+               else
+                  temp_host=$host
+               fi
+             fi
+#             echo "Testing machine configuration ...$host"
+#             host_list_tested="$host $host_list_tested"
+
+             output=`ssh -oBatchMode=yes $host "echo check" < /dev/null 2>&1 `
+             err=$?
+
+             if [ $err -ne 0 ]; then
+                check=`echo $output | grep "Permission denied"`
+                if [ -n "$check" ]; then
+                   echo "$output"
+                   echo "Error: It seems using ssh requires password for $host. Please enable passwordless login and try again!"
+                   exit 1
+                fi
+                check=`echo $output | grep "Host key verification failed"`
+                if [ -n "$check" ]; then
+                   echo "$output"
+                   echo "Error: It seems ssh is trying to verify authenticity of $host. Please resolve it and try again!"
+                   exit 1
+                fi
+                echo "Failed to connect to $host"
+                exit 1
+             fi
+         done
+         export FL_SSH_CONFIG_TESTED=1
+         PARA_CNF=$OLD_PARA_CNF
+#         echo "HOST LIST TESTED = $host_list_tested"
+        fi
+}
+
+###End of ../../bin/run-scripts/common/check_network_config###
+#------------------------------------------------------------------------------
+parallel_node_setup ()
+{
+    # note(s):
+    #  - if this file is changed, then the following file may also need
+    #    changed: <fluent_inc>/bin/run-scripts/utility/parallel_node_setup
+
+    NODE_FLAGS="$NODE_FLAGS -mpiw $PARA_MPI -pic $PARA_INTERCONN"
+
+    # define command to start node executables
+ 
+    case $PARA_MPI in
+        net)
+            # pick up mpi_wrapper stub for parmetis
+            sys_prepend_ld_library_path \
+                 "$PARA_MPORT_ROOT/mpi_wrapper/$FLUENT_ARCH/stub" 
+            EXE_CMD="$FLUENT_NODE_PRE $EXE_CMD $NODE_FLAGS $MP_FLAGS";;
+        *)
+            my_mpirun="$PARA_MPORT_ROOT/mpi_wrapper/bin/mpirun.fl"
+            if [ ! -f $my_mpirun ]; then
+                printf "%s\n" "Error: missing file: $my_mpirun"
+                exit 1
+            fi
+            PRE="$my_mpirun --arch=$FLUENT_ARCH \
+                 --ic=$PARA_INTERCONN --ic_variant=$PARA_IC_VARIANT \
+                 --mpi=$PARA_MPI \
+                 --np=$PARA_NPROCS \
+                 --rsh=$RSHELL \
+                 --prefix=$PARA_MPORT_ROOT"
+            if [ $STREAMTEST -eq 1 ] ; then
+               PRE="$PRE --stream"
+            fi
+            if [ $FL_CACHE_FLUSH -eq 1 ] ; then
+               PRE="$PRE --cflush"
+            fi
+            test -n "$PARA_CNF" && PRE="$PRE --cnf=$PARA_CNF"
+            test -n "$PARA_MPIRUN_FLAGS" && \
+                PRE="$PRE --mpirun_flags=\"$PARA_MPIRUN_FLAGS\""
+            case $FLUENT_ARCH in
+                irix*)  test $SGI_DPLACE -eq 1 && \
+                           PRE="$PRE --dplacedir=$FLUENT_INC/bin";;
+            esac
+            if [ $LSF_ENABLED -eq 1 ]; then
+                PRE="$PRE --sched=lsf"
+                test -n "$LSF_PAM" && PRE="$LSF_PAM -g $PRE"
+            fi
+            test $SGE_ENABLED -eq 1 && PRE="$PRE --sched=sge"
+
+            EXE_CMD="$PRE $FLUENT_NODE_PRE $EXE_CMD $NODE_FLAGS $MP_FLAGS"
+            ;;
+    esac
+}
+
+###End of ./run-scripts/parallel_node_setup###
+#------------------------------------------------------------------------------
+client_executable () {
+	if [ -z "$CLIENT" ]; then
+  		if [ -r $PROD_DIR/client ]; then
+    			CLIENT=$PROD_DIR/client
+  		else
+    			CLIENT=$FLUENT_INC/client
+  		fi
+	fi
+}
+###End of ../../bin/run-scripts/common/client_executable###
+#------------------------------------------------------------------------------
+# $RCSfile: cortex_executable,v $, $Date: 2008/11/10 21:14:02 $, $Revision: 1.15 $
+cortex_executable () {
+    if [ $RESTART -eq 1 ]; then
+        my_rst_journal=
+        if [ -z "$LSB_CHKPNT_DIR" -a -f "#restart.inp" ]; then
+            my_rst_journal="#restart.inp"
+        elif [ ! -z "$LSB_CHKPNT_DIR" -a -f "$LSB_CHKPNT_DIR/#restart.inp" ]; then
+            my_rst_journal="$LSB_CHKPNT_DIR/#restart.inp"
+        elif [ ! -z "$JOURNAL" ]; then
+            my_rst_journal="$JOURNAL"
+        fi
+        #
+        # copy journal file to backup and provide backup to 
+        # fluent.  This allows the input journal file to be
+        # accessed (to obtain unexecuted commands) after fluent
+        # starts writing new journal file when the job is
+        # checkpointed.
+        #
+        if [ -n "$my_rst_journal" ]; then
+            cp $my_rst_journal ${my_rst_journal}.bak
+            CX_FLAGS="$CX_FLAGS -i ${my_rst_journal}.bak";
+        fi
+    elif [ ! -z "$JOURNAL" ]; then
+        CX_FLAGS="$CX_FLAGS -i $MULTIPLE_JOURNAL"
+        # DE160207 - This change is made to take into account multiple journal files passed by the user
+    fi
+
+    if [ -z "$CORTEX" ]; then
+        if [ -r $PROD_DIR/cortex ]; then
+            CORTEX=$PROD_DIR/cortex
+        else
+            CORTEX=$FLUENT_INC/cortex
+    	fi
+    fi
+	
+    if [ -n "$CX_EXE" ]; then
+        EXE=$CX_EXE
+    else
+        CXBASE=cortex
+        case $HOOPS_PICTURE in
+            opengl*)
+                case $FLUENT_ARCH in
+                    aix* | alpha* | dec32a | power* | rs6000) \
+                        CXFILE=`echo $CORTEX/$FLUENT_ARCH/cortexogl.3.[1-2].*`
+                        if [ -f "$CXFILE" ]; then 
+                            CXBASE=cortexogl
+                        fi
+                esac;;
+        esac
+        
+        case $FLUENT_ARCH in
+            lnx86*)
+                sort_flag="-g"
+                ;;
+            *)    sort_flag="-n"
+                ;;
+        esac
+
+        CX_EXE=`cd $CORTEX/$FLUENT_ARCH ;  \
+            echo $CXBASE.[0-9]*.[0-9].[0-9]* | tr ' ' '\012' \
+            | sort $sort_flag -r -t. -k 1,1 -k 2,2 -k 3,3 \
+            | grep -v 'busy' \
+            | head -n 1`
+        EXE=$CORTEX/$FLUENT_ARCH/$CX_EXE
+    fi
+
+    if [ -f "$EXE" ]; then
+        :
+    else
+        list_versions "Error: program $EXE does not exist."
+    fi
+    if [ -x "$EXE" ]; then
+        :
+    else
+        list_versions "Error: file $EXE is not executable."
+    fi
+}
+
+###End of ../../bin/run-scripts/common/cortex_executable###
+#------------------------------------------------------------------------------
+cortex_related_paths () {
+        if [ -z "$SEEMPATH" ]; then
+                SEEMPATH=".:$PROD_DIR/lib:$CLIENT/lib:$CORTEX/lib:$CORTEX/seem/lib:$PROD_DIR/PRIME/tgrid/lib:$PROD_DIR/lib/tgrid"
+                export SEEMPATH
+        else
+                SEEMPATH=".:$SEEMPATH:$PROD_DIR/lib:$CLIENT/lib:$CORTEX/lib:$CORTEX/seem/lib:$PROD_DIR/PRIME/tgrid/lib:$PROD_DIR/lib/tgrid"
+                export SEEMPATH
+        fi
+	
+        if [ -z "$FLUENT_HELP_PATH" ]; then
+                FLUENT_HELP_PATH="${PROD_DIR}/help:${CORTEX}/help"
+                export FLUENT_HELP_PATH
+        else
+                FLUENT_HELP_PATH="${FLUENT_HELP_PATH}:${PROD_DIR}/help:${CORTEX}/help"
+                export FLUENT_HELP_PATH
+        fi
+}
+
+###End of ../../bin/run-scripts/common/cortex_related_paths###
+#------------------------------------------------------------------------------
+# $RCSfile: cortex_to_host,v $, $Date: 2006/09/22 12:34:45 $, $Revision: 1.7 $
+cortex_to_host () {
+test "$PARA_NPROCS" -gt 0 && PASS_HOST_FLAGS="$PASS_HOST_FLAGS -host"
+test -n "$PARA_ARCH" && PASS_HOST_FLAGS="$PASS_HOST_FLAGS -a$PARA_ARCH"
+test -n "$FLUENT_NODE_EXEC_PRE" && PASS_NODE_FLAGS="$PASS_NODE_FLAGS -$FLUENT_NODE_EXEC_PRE_X"
+test -n "$FLUENT_ARCH_FL" && PASS_HOST_FLAGS="$PASS_HOST_FLAGS -fla$FLUENT_ARCH_FL"
+test -n "$PARA_RELEASE" && PASS_HOST_FLAGS="$PASS_HOST_FLAGS -r$PARA_RELEASE"
+test -n "$PARA_NPROCS" && PASS_HOST_FLAGS="$PASS_HOST_FLAGS -t$PARA_NPROCS"
+test -n "$PARA_MPI" && PASS_HOST_FLAGS="$PASS_HOST_FLAGS -mpi=$PARA_MPI"
+test -n "$PARA_CNF" && PASS_HOST_FLAGS="$PASS_HOST_FLAGS -cnf=$PARA_CNF"
+test -n "$FJMEM" && PASS_NODE_FLAGS="$PASS_NODE_FLAGS -fjmem=$FJMEM"
+test -n "$PARA_PART" && PASS_HOST_FLAGS="$PASS_HOST_FLAGS -part$PARA_PART"
+test -n "$FLUENT_INC_PATH" && PASS_HOST_FLAGS="$PASS_HOST_FLAGS -path$FLUENT_INC_PATH"
+test -n "$PARA_MPIRUN_FLAGS" && PASS_HOST_FLAGS="$PASS_HOST_FLAGS -mpiopt=$PARA_MPIRUN_FLAGS"
+test -n "$PARA_MPIRUN_COMMAND" && PASS_HOST_FLAGS="$PASS_HOST_FLAGS -mpirun=$PARA_MPIRUN_COMMAND"
+if [ "$PARA_MPI" = "net" ]; then
+	PASS_HOST_FLAGS="$PASS_HOST_FLAGS -cl net"
+fi
+if [ "$PARA_AUTO_SPAWN" = "#f" ]; then
+    	PASS_HOST_FLAGS="$PASS_HOST_FLAGS -manspa"
+fi
+if [ $PARA_TRACE -eq 1 ]; then
+    	PASS_HOST_FLAGS="$PASS_HOST_FLAGS -ptrace"
+elif [ $PARA_TRACE -eq 2 ]; then
+    	PASS_HOST_FLAGS="$PASS_HOST_FLAGS -ptrace=2"
+fi
+if [ $MTRACE -eq 1 ]; then
+ PASS_HOST_FLAGS="$PASS_HOST_FLAGS -mtrace"
+elif [ $MTRACE1 -eq 1 ]; then
+ PASS_HOST_FLAGS="$PASS_HOST_FLAGS -mtrace=1"
+fi
+test -n "$PARA_LOADHOST" && PASS_HOST_FLAGS="$PASS_HOST_FLAGS -load$PARA_LOADHOST"
+test -n "$FLUENT_LSF_PATH" && PASS_HOST_FLAGS="$PASS_HOST_FLAGS -lsfpath$FLUENT_LSF_PATH"
+test -n "$LSF_OPTIONS" && PASS_HOST_FLAGS="$PASS_HOST_FLAGS -lsfopt=$LSF_OPTIONS"
+if [ $LSF_ENABLED -eq 1 ]; then
+    	PASS_HOST_FLAGS="$PASS_HOST_FLAGS -lsf"
+fi
+#if [ $SGE_ENABLED -eq 1 ]; then
+#	PASS_HOST_FLAGS="$PASS_HOST_FLAGS -sge"
+#fi
+if [ $MPCCI_ENABLED -eq 1 ]; then
+      PASS_HOST_FLAGS="$PASS_HOST_FLAGS -mpcci $CCI_FLAGS"
+fi
+if [ $SGI_DPLACE -eq 0 ]; then
+    	PASS_HOST_FLAGS="$PASS_HOST_FLAGS -nodplace"
+fi
+if [ $SSH_SPAWN -eq 1 ]; then
+    	PASS_HOST_FLAGS="$PASS_HOST_FLAGS -ssh"
+fi
+if [ $GPU -gt 0 ]; then
+  PASS_HOST_FLAGS="$PASS_HOST_FLAGS -gpgpu=$GPU"
+fi
+test -n "$PASS_NODE_FLAGS" && PASS_HOST_FLAGS="$PASS_HOST_FLAGS $PASS_NODE_FLAGS"
+test -n "$PARA_INTERCONN" && VERSION="$VERSION -p$PARA_INTERCONN"
+test -n "$PASS_HOST_FLAGS" && VERSION="$VERSION $PASS_HOST_FLAGS"
+}
+
+###End of ./run-scripts/cortex_to_host###
+#------------------------------------------------------------------------------
+# $RCSfile: start_cortex_executable,v $, $Date: 2007/03/09 08:54:47 $, $Revision: 1.5 $
+start_cortex_executable () {
+	
+	if [ -n "$PASS_PROD_FLAGS" ]; then
+		 VERSION="$VERSION $PASS_PROD_FLAGS"
+	fi
+  if [ -n "$CCI" ]; then
+     VERSION="$VERSION $CCI"
+  fi
+	if [ -z "$CX_FUNCTION" ]; then
+	 	CX_FUNCTION="($FLUENT_PROD \"$VERSION\")"
+	fi
+	if [ -n "$CORTEX_DEBUG" ]; then
+		echo $CORTEX_DEBUG $EXE
+		if [ "$CORTEX_DEBUG" = "gdb" -o "$CORTEX_DEBUG" = "ddd" ]; then
+			tempfile=`mktemp`
+			echo      path $FLUENT_INC_bin >> $tempfile
+			echo      set args -f $FLUENT_PROD $CX_FLAGS "'$CX_FUNCTION'" >> $tempfile
+			echo echo now type \"run\"... >> $tempfile
+		###	echo                 run      >> $tempfile
+
+		        ## Try to attach the GDB provided in the FBU_Dependencies, not any one from the PATH:
+		        MYGDB="$EXE"
+		        MYGDB=`dirname "$MYGDB"`
+		        MYGDB=`dirname "$MYGDB"`
+		        MYGDB=`dirname "$MYGDB"`
+		        MYGDB=`dirname "$MYGDB"`
+		        MYGDB=`dirname "$MYGDB"`
+		        MYGDB="$MYGDB"/FBU_Dependencies/thirdparty/compilers/gcc/linx64/bin/gdb
+		        ##echo DBG: MYGDB: $MYGDB
+		        if [ \! -x "$MYGDB" ]; then
+		            MYGDB=gdb
+		            ##echo DBG: ...not found, reverting to gdb...
+		        fi
+
+                        if [ "$CORTEX_DEBUG" = "gdb" ]; then
+			    $NO_RUN $MYGDB -x $tempfile $EXE
+                        else
+			    $NO_RUN $CORTEX_DEBUG --debugger "$MYGDB -x $tempfile" $EXE
+                        fi
+
+			rm -f $tempfile
+                elif [ "$CORTEX_DEBUG" = "totalview" -o "$CORTEX_DEBUG" = "tv" ]; then
+                        CX_FUNCTION="\"`echo '' $CX_FUNCTION | sed -e 's/"/\\\\"/g'`\""
+                        CX_FUNCTION="  `echo '' $CX_FUNCTION | sed -e 's/\\\\/\\\\\\\\/g' -e 's/"/\\\\"/g'`  "
+                        totalview -e "dbreak main" -e "drun -f $FLUENT_PROD $CX_FLAGS "'"'"$CX_FUNCTION"'"' $EXE
+		else
+			echo "In debugger, type: run" -f $FLUENT_PROD $CX_FLAGS \'"$CX_FUNCTION"\'
+			$NO_RUN $CORTEX_DEBUG              $EXE
+		fi
+	else
+                if [ -n "$CORTEX_PRE" ]; then
+                    if [ -n "`echo $CORTEX_PRE | grep 'grind'`" ]; then
+
+                        if [ -n "`echo $CORTEX_PRE | grep ' \-wait'`" ]; then
+                          vgwait="--db-attach=yes"
+                        fi
+
+                        ## To find fluvalgrind:
+                        export PATH=$PATH:"`dirname $0`"
+
+                        ## fluvalgrind shell-expands this once more; need to add a level of quotation:
+                        if [ -n "$CX_FUNCTION" ]; then
+                          CX_FUNCTION="\"`echo $CX_FUNCTION | sed -e 's/"/\\\\"/g'`\""
+                        fi
+
+                        case $FLUENT_DEBUGGER in
+                          *gdb|*ddd)
+                            db_command="\"$FLUENT_DEBUGGER $EXE %p\""
+                            ;;
+                          *idb)
+                            db_command="\"$FLUENT_DEBUGGER -gdb $EXE -pid %p\""
+                            ;;
+                          tv|*totalview)
+                            if [ "tv" = "$FLUENT_DEBUGGER" ]; then
+                              export FLUENT_DEBUGGER=totalview
+                            fi
+                            db_command="\"$FLUENT_DEBUGGER -pid %p $EXE\""
+                            ;;
+                          *)
+                            echo $0: Do not know what to tell fluvalgrind how to attach the debugger $FLUENT_DEBUGGER.
+                            echo $0: Please mend me---or have me mended.
+                            echo $0: Do not know what to tell fluvalgrind how to attach the debugger $FLUENT_DEBUGGER. 1>&2
+                            echo $0: Please mend me---or have me mended. 1>&2
+                            ;;
+                        esac
+
+                        if [ -z "$ORIG_FLUENT_PRE" ]; then
+                          export ORIG_FLUENT_PRE="$CORTEX_PRE"
+                        fi
+                        export CORTEX_PRE="$ORIG_FLUENT_PRE -v  $vgwait" # "--db-command=${db_command}  $VALGRIND_OPTS"
+                                                                         #    ^^^^^not available in valgrind 3.11 -- use --vgdb=...
+		    fi
+		fi
+		echo $CORTEX_PRE $EXE -f $FLUENT_PROD $CX_FLAGS "$CX_FUNCTION"
+		if [ -z "$NO_EXEC" ]; then
+			if [ -n "$CORTEX_ATTACH" ]; then
+	 			$NO_RUN $CORTEX_PRE $EXE -f $FLUENT_PROD $CX_FLAGS "$CX_FUNCTION"  &
+				$CORTEX_ATTACH  $EXE  $!
+			else
+	 			$NO_RUN $CORTEX_PRE $EXE -f $FLUENT_PROD $CX_FLAGS "$CX_FUNCTION"
+				retval=$?
+				if [ $retval -ne 0 ]; then
+				  return $retval
+				fi
+			fi
+		fi
+	fi	
+
+}
+
+
+###End of ../../bin/run-scripts/common/start_cortex_executable###
+#------------------------------------------------------------------------------
+# $RCSfile: start_launcher_executable,v
+
+start_launcher_executable () {
+    launcher_args=""
+    START_LAUNCHER="0"
+    short_cut="0"
+    case $VERSION in
+        [23]d*) ;;
+        *)      START_LAUNCHER="1";;
+    esac
+
+    if [ "$FLUENT_GUI" = "off" ]; then
+        START_LAUNCHER="0"
+    fi
+
+    if [ "$START_LAUNCHER" = "1" ]; then          
+        while [ $# -gt 0 ]; do
+        case $1 in
+            -env)       START_LAUNCHER=0;;
+            -norun)     START_LAUNCHER=0;;
+            -g)         START_LAUNCHER=0;;
+            -gr)        START_LAUNCHER=0;;
+            -gu)        START_LAUNCHER=0;;
+            -h)         START_LAUNCHER=0;;
+            -help)      START_LAUNCHER=0;;
+            -manspa)    START_LAUNCHER=0;;
+            -mpitest)   START_LAUNCHER=0;;
+            -r)         START_LAUNCHER=0;;
+            -serv)      START_LAUNCHER=0;;
+            -v)         START_LAUNCHER=0;;
+            [23]d*)     START_LAUNCHER=0;;
+            -diag*)     launcher_args="$launcher_args --check_log 1";
+                        launcher_args="$launcher_args $1";;
+            --fluent_options) LAUNCHER_FLUENT_OPTIONS=$2; 
+                        export LAUNCHER_FLUENT_OPTIONS; shift;;
+            -shortcut)  short_cut="1";;
+            -r*)        if [ -n "$PASS_IN_RELEASE" ]; then 
+                            launcher_args="$launcher_args $1";
+                        fi
+                        ;;
+            *)          launcher_args="$launcher_args $1";;
+        esac
+        shift
+        done
+
+        if [ "$short_cut" = "0" ]; then
+            if [ -n "$FLUENT_INC" ]; then
+                launcher_args="$launcher_args --fluent_inc_path $FLUENT_INC"
+            fi
+            if [ -n "$PWD" ]; then
+                PWD_NEW=`echo $PWD | sed 's/ /PLF+/g'`
+                launcher_args="$launcher_args --working_dir $PWD_NEW"
+            fi
+        fi
+
+        if [ -n "$FL_PARA_DEFAULT_MODE" ]; then
+         unset FL_PARA_DEFAULT_MODE
+        fi
+
+        LAUNCHER_DIR="$FLUENT_INC/$FLUENT_PROD$RELEASE/launcher"
+        LAUNCHER="$LAUNCHER_DIR/bin/launcher"
+        if [ "$START_LAUNCHER" = "1" -a\
+             -x "$LAUNCHER_DIR/$FLUENT_ARCH/launcher1" -a \
+             -x "$LAUNCHER" ]; then
+            #echo "$LAUNCHER -a$FLUENT_ARCH $MYINC $MYWD $ADDFLAG"
+            $LAUNCHER -a$FLUENT_ARCH $launcher_args
+            exit
+        fi
+    fi
+}
+
+remote_node_executable () {
+    remote_args=""
+    SPAWN_NODE=
+    IF_NODE=0
+    CNF_FILE=
+    while [ $# -gt 0 ]; do
+        case $1 in
+                -node)
+                        IF_NODE=1;
+                        remote_args="$remote_args $1";
+                        shift ;;
+                -cnf=*)
+                        CNF_FILE=`echo $1 | sed 's/-cnf=//'`;
+                        remote_args="$remote_args $1";
+                        shift ;;
+                *)
+                        remote_args="$remote_args $1";
+                        shift ;;
+        esac
+    done
+
+    if [ -n "$FL_SPAWN_NODE_PICK" -a -n "$CNF_FILE" ]; then
+        if [ -e "$CNF_FILE" ]; then
+            while read line; do
+                host=`echo $line | awk -F: '{print $1}'`
+                export FL_SPAWN_NODE=$host
+                break;
+            done <  $CNF_FILE        
+        else
+            host=`echo $CNF_FILE | awk -F: '{print $1}'`
+            export FL_SPAWN_NODE=$host
+        fi
+    fi
+
+
+    if [ -n "$FL_SPAWN_NODE" -a -n "$FLUENT_INC" -a "$IF_NODE" -eq 1 ]; then
+        if [ -z "$FL_RSHELL" ] ; then
+            FL_RSHELL=ssh
+        fi
+        WRK_DIR=`pwd`
+        echo "Remote launching on $FL_SPAWN_NODE:$WRK_DIR"
+        $FL_RSHELL -n $FL_SPAWN_NODE "cd $WRK_DIR; ${FLUENT_INC}/bin/fluent $remote_args"
+        exit $?
+    fi
+}
+
+###End of ./run-scripts/start_launcher_executable###
+#------------------------------------------------------------------------------
+
+idbpathidb() {
+  echo "${FLUENT_INC}/packages${RELEASE%.[0-9]}/intel/lnamd64/composerxe/bin/idb"
+}
+
+fluent_debugger () {
+  if [ "$FLUENT_DEBUGGER" = "idb" ]; then
+    FLUENT_DEBUGGER="`idbpathidb`"
+    export FLUENT_DEBUGGER
+  elif [ -z "$FLUENT_DEBUGGER" ]; then
+    whichgdb="`type gdb 2>/dev/null`"
+    if [ -n "$whichgdb" ]; then
+      FLUENT_DEBUGGER=gdb
+    else
+      whichddd="`type ddd 2>/dev/null`"
+      if [ -n "$whichddd" ]; then
+        FLUENT_DEBUGGER=ddd
+      else
+        idb="`idbpathidb`"
+        whichidb="`type $idb 2>/dev/null`"
+        if [ -n "$whichidb" ]; then
+          FLUENT_DEBUGGER=$idb
+        else
+          whichtv="`type totalview 2>/dev/null`"
+          if [ -n "$whichtv" ]; then
+            FLUENT_DEBUGGER=totalview
+          fi
+        fi
+      fi
+    fi
+  fi
+  export FLUENT_DEBUGGER
+}
+
+
+###End of ./run-scripts/fluent_debugger###
+#------------------------------------------------------------------------------
+
+check_debug_build_commit () {
+    BUILDINFO="${FLUENT_INC_PATH}/.install_build_info.txt"
+    if [ -e $BUILDINFO ]; then
+        while read line; do
+            if [ "$line" = "" ]; then
+                continue
+            fi
+
+            key=`echo $line | cut -f1 -d= | xargs`
+            value=`echo $line | cut -f2 -d= | xargs`
+
+            if [ "$key" = "sha1" ]; then
+                sha1=$value
+            elif [ "$key" = "fluent_root" ]; then
+                fluentroot=$value
+            elif [ "$key" = "uncommitted_files" ]; then
+                uncommittedfiles=$value
+            fi
+        done < $BUILDINFO
+
+        workdir=`pwd`
+        cd $fluentroot
+        actualsha1=`git rev-parse HEAD`
+        if [ "$actualsha1" != "$sha1" ]; then
+            echo
+            echo "****************************************"
+            echo "This build was compiled from git commit"
+            echo "$sha1, but the source repo"
+            echo "$fluentroot is at "
+            echo "git commit $actualsha1."
+            echo "The source files may not line up with the debug binaries."
+            echo "****************************************"
+            echo
+        elif [ "$uncommittedfiles" != "0" ]; then
+            echo
+            echo "****************************************"
+            echo "The source repo $fluentroot is at"
+            echo "correct git commit ($sha1) for this"
+            echo "build, but there were uncommitted changes in the repository during"
+            echo "compilation. The source files may not line up with the debug binaries."
+            echo "****************************************"
+            echo
+        fi
+        cd $workdir
+    fi
+}
+
+###End of ./run-scripts/check_debug_build_commit###
+#------------------------------------------------------------------------------
+# $RCSfile: main_program,v $, $Date: 2010/01/20 20:54:42 $, $Revision: 1.49 $
+
+# remote spawning if needed
+remote_node_executable $cmdargs
+
+## Explicit naming required here as some of the packages
+## like SGE can rename the script and save at other place
+FLUENT_PROD=fluent
+RUN_SCRIPT=fluent
+MPCCI_Check $cmdargs
+fluent_inc $cmd
+variables
+command_arguments $cmdargs
+if [ "$VERSION" = "3d_debug" -o "$VERSION" = "3ddp_debug" -o "$VERSION" = "2d_debug" -o "$VERSION" = "2ddp_debug" ]; then
+    check_debug_build_commit
+fi
+fluent_release
+existant_release_archs
+release
+if [ $NODE_ENABLED -ne 1 ]; then
+    print_patch
+fi
+
+fluent_architecture
+architecture
+cortex_app_architecture
+fluent_version
+
+### For AFD Mixed Win/Linux mode
+if [ -n "$AFD_MIXED_MODE" ]; then
+
+   if [ -d "${AFD_ROOT}_Dependencies/CPython/2_7_3/linx64/Release/python/bin" ]; then
+      PYTHON_BIN_PATH="${AFD_ROOT}_Dependencies/CPython/2_7_3/linx64/Release/python/bin"
+   elif [ -d "$AFD_ROOT/CPython/2_7_3/linx64/Release/python/bin" ]; then
+      PYTHON_BIN_PATH="$AFD_ROOT/CPython/2_7_3/linx64/Release/python/bin"
+   elif [ -d "$AFD_ROOT/../commonfiles/CPython/2_7_3/linx64/Release/python/bin" ]; then
+      PYTHON_BIN_PATH="$AFD_ROOT/../commonfiles/CPython/2_7_3/linx64/Release/python/bin"
+   else
+      echo "Could not find CPython ..."
+      exit 1
+   fi
+
+  FLUENT_NODE_PRE="$PYTHON_BIN_PATH/python $AFD_ROOT/PyLib/kernel/Engine/ComputeNode.py"
+
+  AFD_BIN="$AFD_ROOT/afd/$AFD_ARCH/bin"
+  AFD_LIB="$AFD_ROOT/afd/$AFD_ARCH/lib"
+  PYTHON_LIB_PATH=`dirname $PYTHON_BIN_PATH`/lib
+
+  if [ -z "$LD_LIBRARY_PATH" ]; then
+     export LD_LIBRARY_PATH=$PYTHON_LIB_PATH:$AFD_BIN:$AFD_BIN/compiler:$AFD_BIN/$VERSION/Engine:$FLUENT_INC/lib/$FLUENT_ARCH:.:$PROD_DIR/$FLUENT_ARCH/$VERSION_host:$PROD_DIR/$FLUENT_ARCH/$VERSION_node
+  else
+     export LD_LIBRARY_PATH=$PYTHON_LIB_PATH:$AFD_BIN:$AFD_BIN/compiler:$AFD_BIN/$VERSION/Engine:$FLUENT_INC/lib/$FLUENT_ARCH:.:$PROD_DIR/$FLUENT_ARCH/$VERSION_host:$PROD_DIR/$FLUENT_ARCH/$VERSION_node:$LD_LIBRARY_PATH
+  fi
+
+  export PATH="$PATH:$AFD_BIN/$VERSION/Engine:$AFD_BIN:$AFD_LIB:$FLUENT_INC/bin:$PROD_DIR/$FLUENT_ARCH/$VERSION_host:$AFD_BIN/$VERSION/Controller:$AFD_ROOT/Python/$AFD_ARCH/bin:$PROD_DIR/$FLUENT_ARCH/$VERSION_node"
+fi
+
+if [ -z "$FLUENT_LM_CHECK_DISABLE" -a -z "$FL_USING_HOSTFILE" ]; then
+#   if [ "$CORTEX_ENABLED" -eq 1 -a -n "$RESTARTED" -a $SGE_APP_LAUNCHED -eq 0 ]; then
+#       unset RESTARTED
+#   fi
+   LoadManager_Check_and_Launch $cmdargs
+fi
+
+parallel_setup
+pre_execute
+
+# show the sys info only
+if [ -n  "`echo $cmdargs | grep '\-sysinfo'`"  ]; then
+   if [ -f "$FLUENT_INC/$FLUENT_PROD$RELEASE/launcher/bin/info.sh" ]; then
+      sh $FLUENT_INC/$FLUENT_PROD$RELEASE/launcher/bin/info.sh
+      exit
+   fi
+fi
+
+# launcher startup if version is not given
+start_launcher_executable $cmdargs
+
+if [ -z "$FL_PARA_DEFAULT_MODE" -a "$PARA_NPROCS" -eq "$FL_DEFAULT_NPROCS" ]; then
+   export FL_PARA_DEFAULT_MODE=1
+fi
+
+# set the NPTL version
+case $FLUENT_ARCH in
+    lnx86* | lnia64 | lnamd64)
+        FLUENT_NPTL_VERSION=`getconf GNU_LIBPTHREAD_VERSION`;
+        export FLUENT_NPTL_VERSION;;
+esac
+
+if [ $NODE_ENABLED -eq 0 ]; then
+    cortex_app_display_driver
+fi
+license_path
+Monitor_config
+
+if [ $HOST_ENABLED -eq 1 ]; then
+    host_to_node
+fi
+if [ $MPCCI_ENABLED -eq 0 ]; then
+  if [ $IBMOD_FLAG -eq 0 ]; then
+    isat_lib
+  fi
+fi
+kinetics_lib
+addons_lib
+acoustic_lib
+cpropep_lib
+fsi_lib
+vki_lib
+cortex_app_shared_library
+client_executable
+
+if [ $CORTEX_ENABLED -eq 1 ] ; then
+    cortex_executable
+    cortex_to_host   
+fi
+
+cortex_related_paths
+
+# Add path for multiport shared library
+if [ $NODE_ENABLED -eq 0 ]; then
+   sys_prepend_ld_library_path "$PROD_DIR/multiport/$FLUENT_ARCH/net/shared"
+fi
+
+fluent_debugger
+
+if [ -n "$SHOW_ENV"  -a -z "$NO_RUN" ]; then
+    printenv || env
+fi
+
+if [ $FL_CACHE_FLUSH -eq 1 ] ; then
+   TEST_EXE="$PROD_DIR/multiport/mpi_wrapper/test"
+   TEST_EXE="$TEST_EXE/$FLUENT_ARCH/cflush"
+   if [ -f $TEST_EXE ] ; then
+      EXE_CMD="$FLUENT_PRE $TEST_EXE"
+   else
+      echo "File not available: $TEST_EXE"
+      exit
+   fi
+   node_flags
+   parallel_node_setup
+   echo "Launching $EXE_CMD"
+   $EXE_CMD
+   FL_CACHE_FLUSH=0
+fi
+
+if [ $CORTEX_ENABLED -eq 1 ] ; then
+#    arch_info > /dev/null 2>&1
+    start_cortex_executable
+    retval=$?
+    if [ $retval -ne 0 ]; then
+        exit $retval
+    fi
+fi
+
+if [ $CORTEX_ENABLED -eq 0 ] ; then
+
+    if [ $NODE_ENABLED -eq 1 ]; then
+        parallel_fluent
+    fi
+
+    version_release_executable
+
+
+    if [ -n "`echo $FLUENT_PRE | grep grind`" ]; then
+
+      if [ -n "`echo $FLUENT_PRE | grep ' \-wait'`" ]; then
+        vgwait="--db-attach=yes"
+      fi
+
+      ## To find fluvalgrind:
+      export PATH=$PATH:"`dirname $0`"
+
+      ## fluvalgrind shell-expands this once more; need to add a level of quotation:
+      if [ -n "$HOST_FUNCTION" -a -n "`echo $FLUENT_PRE | grep fluvalgrind`" ]; then
+        HOST_FUNCTION="\"`echo $HOST_FUNCTION | sed -e 's/"/\\\\"/g'`\""
+      fi
+
+      case $FLUENT_DEBUGGER in
+        *gdb|*ddd)
+          db_command="\"$FLUENT_DEBUGGER $EXE %p\""
+          ;;
+        *idb)
+          db_command="\"$FLUENT_DEBUGGER -gdb $EXE -pid %p\""
+          ;;
+        tv|*totalview)
+          if [ "tv" = "$FLUENT_DEBUGGER" ]; then
+            export FLUENT_DEBUGGER=totalview
+          fi
+          db_command="\"$FLUENT_DEBUGGER -pid %p $EXE\""
+          ;;
+        *)
+          echo $0: Do not know what to tell valgrind how to attach the debugger $FLUENT_DEBUGGER.
+          echo $0: Please mend me---or have me mended.
+          echo $0: Do not know what to tell valgrind how to attach the debugger $FLUENT_DEBUGGER. 1>&2
+          echo $0: Please mend me---or have me mended. 1>&2
+          ;;
+      esac
+
+      if [ -z "$ORIG_FLUENT_PRE" ]; then
+        export ORIG_FLUENT_PRE="$FLUENT_PRE"
+      fi
+      if [ -n "`echo $FLUENT_PRE | grep fluvalgrind`" ]; then
+        export FLUENT_PRE="$ORIG_FLUENT_PRE -v  $vgwait" # "--db-command=${db_command}  $VALGRIND_OPTS"
+                                                         #    ^^^^^not available in valgrind 3.11 -- use --vgdb=...
+      fi
+    fi
+
+    EXE_CMD="$FLUENT_PRE $EXE $PROD_FLAGS $LSF_FLAGS $SGE_FLAGS"
+
+    if [ $MPITEST -eq 1 -a $NODE_ENABLED -eq 1 ] ; then
+        TEST_EXE="$PROD_DIR/multiport/mpi_wrapper/test"
+        TEST_EXE="$TEST_EXE/$FLUENT_ARCH/test"
+        if [ -f $TEST_EXE ] ; then
+            EXE_CMD="$FLUENT_PRE $TEST_EXE"
+        else
+            echo "File not available: $TEST_EXE"
+            exit
+        fi
+    fi
+
+    if [ $STREAMTEST -eq 1 ] ; then
+        TEST_EXE="$PROD_DIR/multiport/mpi_wrapper/test"
+        TEST_EXE="$TEST_EXE/$FLUENT_ARCH/stream"
+        if [ -f $TEST_EXE ] ; then
+            EXE_CMD="$FLUENT_PRE $TEST_EXE"
+        else
+            echo "File not available: $TEST_EXE"
+            exit
+        fi
+    fi
+
+    if [ -z "$CX_SINGLE" ]; then
+        CX_FUNCTION=
+    fi
+
+    if [ $HOST_ENABLED -eq 1 ]; then
+        host_flags
+        check_network_config
+    elif [ $HOST_ENABLED -eq 0 -a $NODE_ENABLED -eq 0 ]; then
+        sys_append_ld_library_path $PROD_DIR/multiport/mpi_wrapper/$FLUENT_ARCH/stub
+        sys_prepend_ld_library_path $PROD_DIR/addons/afd/$FLUENT_ARCH
+    fi
+
+    if [ $NODE_ENABLED -eq 1 ]; then
+        node_flags
+        parallel_node_setup
+    fi
+
+    if [ $MPITEST -eq 1 -a $NODE_ENABLED -eq 1 ] ; then
+       echo "Starting $EXE_CMD"
+    fi
+
+    # start executables
+
+    if [ -z "$NO_EXEC" ]; then
+     ## if [ -n "$HOST_FUNCTION" ]; then
+     ##     # host executable
+     ##     echo Starting $EXE_CMD $CX_FLAGS $FL_FLAGS \"$HOST_FUNCTION\" 1>&2
+     ##     $EXE_CMD $CX_FLAGS $FL_FLAGS "$HOST_FUNCTION"
+     ## el
+        if [ -n "$CX_FUNCTION" ]; then
+            # cortex-fluent single executable / shared library for AFD:
+            echo Starting $EXE_CMD $CX_FLAGS \"$CX_FUNCTION\" 1>&2
+            $EXE_CMD $CX_FLAGS "$CX_FUNCTION"
+        elif [ $NODE_ENABLED -eq 0 ]; then
+            # serial executable
+            if [ -n "$CLIENT_DEBUG" ]; then
+                echo Starting $CLIENT_DEBUG $EXE 1>&2
+##	##	echo "In debugger, type: run" $CX_FLAGS $FL_FLAGS
+##	##	$CLIENT_DEBUG $EXE_CMD
+		if [ "$CLIENT_DEBUG" = "gdb" -o "$CLIENT_DEBUG" = "ddd" ]; then
+			tempfile=`mktemp`
+			echo      path $FLUENT_INC_bin >> $tempfile
+                        if [ -n "$HOST_FUNCTION" ]; then
+                            ## if [ -n "$HOST_FUNCTION" ]; then
+                            ##   HOST_FUNCTION="\"`echo $HOST_FUNCTION | sed -e 's/"/\\\\"/g'`\""
+                            ## fi
+			    echo      set args  $PROD_FLAGS $CX_FLAGS $FL_FLAGS "'$HOST_FUNCTION'" >> $tempfile
+                        else
+			    echo      set args  $PROD_FLAGS $CX_FLAGS $FL_FLAGS                    >> $tempfile
+                        fi
+			echo echo now type \"run\"... >> $tempfile
+	###		echo                 run      >> $tempfile
+		        MYGDB="$EXE"
+		        MYGDB=`dirname "$MYGDB"`
+		        MYGDB=`dirname "$MYGDB"`
+		        MYGDB=`dirname "$MYGDB"`
+		        MYGDB=`dirname "$MYGDB"`
+		        MYGDB=`dirname "$MYGDB"`
+		        MYGDB="$MYGDB"/FBU_Dependencies/thirdparty/compilers/gcc/linx64/bin/gdb
+		        ##echo DBG: MYGDB: $MYGDB
+		        if [ \! -x "$MYGDB" ]; then
+		            MYGDB=gdb
+		            ##echo DBG: ...not found, reverting to gdb...
+		        fi
+		        if [ "$CLIENT_DEBUG" = "gdb" ]; then
+			     CLIENT_DEBUG="xterm -e $MYGDB"
+			    $CLIENT_DEBUG -x $tempfile $EXE
+                        else
+			    $CLIENT_DEBUG --debugger "$MYGDB -x $tempfile" $EXE
+                        fi
+			rm -f $tempfile
+		elif [ "$CLIENT_DEBUG" = "totalview" -o "$CLIENT_DEBUG" = "tv" ]; then
+                        if [ $NODE_ENABLED -eq 1 ]; then
+                            ## Will never get here because of "if [ $NODE_ENABLED -eq 0 ]; then" above.
+                            totalview -e "dbreak main" -e "drun $FLUENT_NODE_PRE $EXE_CMD $NODE_FLAGS $MP_FLAGS " `echo $PRE | sed -e 's# .*$##'`
+                        elif [ -n "$HOST_FUNCTION" ]; then
+                            if [ -n "$HOST_FUNCTION" ]; then
+                              ###. ......... \" .... .............. . ... .. ............. \"
+                              HOST_FUNCTION="\"`echo $HOST_FUNCTION | sed -e 's/"/\\\\"/g'`\""
+                              HOST_FUNCTION="  `echo $HOST_FUNCTION | sed -e 's/\\\\/\\\\\\\\/g' -e 's/"/\\\\"/g'`  "
+                            fi
+			    totalview -e "dbreak main" -e "drun $PROD_FLAGS $CX_FLAGS $FL_FLAGS "'"'"$HOST_FUNCTION"'"' $EXE
+                        else
+			    totalview -e "dbreak main" -e "drun $PROD_FLAGS $CX_FLAGS $FL_FLAGS "                       $EXE
+                        fi
+		else
+			echo "In debugger, type: run"  $PROD_FLAGS $CX_FLAGS $FL_FLAGS
+			$NO_RUN $CLIENT_DEBUG              $EXE
+		fi
+     ## Replacement for lines commented out like this above:
+            elif [ -n "$HOST_FUNCTION" ]; then
+                # host executable
+                echo Starting $EXE_CMD $CX_FLAGS $FL_FLAGS \"$HOST_FUNCTION\"
+                $EXE_CMD $CX_FLAGS $FL_FLAGS "$HOST_FUNCTION"
+                retval=$?
+                if [ $retval -ne 0 ]; then
+                    exit $retval
+                fi
+            else
+                if [ $NODE_ENABLED -eq 0 ]; then
+                    echo Starting $EXE_CMD $CX_FLAGS $FL_FLAGS
+                fi
+                $EXE_CMD $CX_FLAGS $FL_FLAGS
+            fi
+        else
+            # node executable(s)
+            #echo Starting $EXE_CMD $CX_FLAGS 1>&2
+            $EXE_CMD $CX_FLAGS $FL_FLAGS
+	    retval=$?
+	    if [ $retval -ne 0 ]; then
+                exit $retval
+	    fi
+        fi
+    fi
+
+    # perform cleanup for SGE
+
+    if [ $HOST_ENABLED -eq 1 -a $SGE_ENABLED -eq 1 -a -n "$PARA_CNF" ]; then
+        test -f $PARA_CNF && /bin/rm -f $PARA_CNF
+    fi
+fi
+
+###End of ./run-scripts/main_program###
+#------------------------------------------------------------------------------
