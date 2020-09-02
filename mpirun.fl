@@ -88,7 +88,7 @@ openmpi_run ()
      if [ -z "$FS_CNF" ]; then
         my_lhost=`hostname`
         my_cmdline="$my_cmdline $my_per_host_flags \
-            --n $FS_NPROC --host ${my_lhost}:$FS_NPROC $FS_CMD"
+            -n $FS_NPROC --host ${my_lhost}:$FS_NPROC $FS_CMD"
 	else
       AFD_ARCH="linx64"; export AFD_ARCH	        ## AFD specific env setup
         my_envvars=
