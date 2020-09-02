@@ -77,7 +77,7 @@ openmpi_run ()
     export OMPI_MCA_mca_component_show_load_errors=0
     export H_MEMORYLOCKED=infinity
 
-    my_cmdline="$srun -n $SLURM_NTASKS $FS_CMD";		
+    my_cmdline="srun -n $SLURM_NTASKS $FS_CMD";		
     # start job
 
     echo Starting $my_cmdline
